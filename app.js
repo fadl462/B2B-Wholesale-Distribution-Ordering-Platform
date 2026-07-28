@@ -129,6 +129,13 @@ const DELIVERIES = [
 const state = {
   view: 'marketing',
   pulseStarted:false,
+  showRuleForm:false,
+  ruleDraft:{ tier:'Gold', qtyOp:'>', qtyVal:100, region:'North', discount:12, freeShipping:true, priority:true },
+  rules:[
+    { tier:'Gold', qtyOp:'>', qtyVal:100, region:'North', discount:12, freeShipping:true, priority:true },
+    { tier:'Silver', qtyOp:'>=', qtyVal:50, region:'Any', discount:6, freeShipping:false, priority:false },
+    { tier:'Gold', qtyOp:'>', qtyVal:20, region:'Any', discount:8, freeShipping:false, priority:true },
+  ],
   wizard: {
     step: 0, // index into WIZARD_STEPS
     business: { branch:'osu', location:'Oxford Street, Osu, Accra', rep:'Kojo Mensah' },
@@ -853,7 +860,7 @@ function stepConfirm(){
   <div class="wizard-nav">
     <button class="btn btn-ghost" onclick="setView('dispatch')">Track order →</button>
     <div style="display:flex;gap:10px;">
-      <button class="btn btn-ghost" onclick="alert('Invoice PDF generated (prototype simulation).')">Download invoice PDF</button>
+      <button class="btn btn-ghost" onclick="toast('📄','Invoice PDF generated for ${w().orderNum}')">Download invoice PDF</button>
       <button class="btn btn-primary" onclick="resetWizard()">Start new order</button>
     </div>
   </div>
@@ -1101,6 +1108,20 @@ function viewAdmin(){
         <div class="list-row"><span>SMS / WhatsApp notify</span><span class="badge green">Connected</span></div>
       </div>
     </div>
+
+    <div class="card" style="margin-top:16px;" id="ruleBuilderSection">
+      <div class="flex-between" style="margin-bottom:12px;">
+        <div>
+          <div class="card-title" style="margin:0;">No-code pricing &amp; promotion rules</div>
+          <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Ops teams build discount, shipping and fulfilment logic visually — no developer required.</p>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="toggleRuleForm()">${state.showRuleForm?'Cancel':'+ New rule'}</button>
+      </div>
+
+      ${state.showRuleForm ? renderRuleForm() : ''}
+
+      <div id="ruleList">${renderRuleList()}</div>
+    </div>
   </div>
   `;
 }
@@ -1157,7 +1178,7 @@ function viewDispatch(){
               <td>${d.addr}</td>
               <td>${d.win}</td>
               <td>${statusBadge(d.status==='Out for delivery'?'In Transit':d.status==='Delivered'?'Delivered':'Outstanding')}</td>
-              <td>${d.status!=='Delivered' ? `<button class="btn btn-ghost btn-sm" onclick="alert('Proof of delivery captured: signature + photo + OTP verified (prototype simulation).')">Capture POD</button>` : '<span style="color:var(--muted);font-size:12px;">✓ Signed &amp; photographed</span>'}</td>
+              <td>${d.status!=='Delivered' ? `<button class="btn btn-ghost btn-sm" onclick="toast('✅','Proof of delivery captured — signature, photo &amp; OTP verified')">Capture POD</button>` : '<span style="color:var(--muted);font-size:12px;">✓ Signed &amp; photographed</span>'}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -1181,4 +1202,208 @@ function viewDispatch(){
     </div>
   </div>
   `;
+}
+
+/* ---------------- Toasts ---------------- */
+function toast(icon, msg){
+  const host = document.getElementById('toastHost');
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = `<span class="ic">${icon}</span><span>${msg}</span>`;
+  host.appendChild(el);
+  setTimeout(()=>{
+    el.classList.add('leaving');
+    setTimeout(()=>el.remove(), 220);
+  }, 3200);
+}
+
+/* ---------------- Theme ---------------- */
+function toggleTheme(){
+  const html = document.documentElement;
+  const dark = html.getAttribute('data-theme') === 'dark';
+  html.setAttribute('data-theme', dark ? 'light' : 'dark');
+  document.getElementById('themeToggle').textContent = dark ? '🌙' : '☀️';
+  renderMain(); // re-render current view so charts repaint against the new theme
+}
+
+/* ---------------- Command palette ---------------- */
+const CMDK_ITEMS = [
+  { label:'Overview — marketing home', kind:'Portal', action:()=>setView('marketing') },
+  { label:'Customer Portal — dashboard', kind:'Portal', action:()=>setView('customer') },
+  { label:'Start a guided order', kind:'Action', action:()=>setView('wizard') },
+  { label:'Warehouse Portal — pick / pack / dispatch', kind:'Portal', action:()=>setView('warehouse') },
+  { label:'Sales Rep Portal', kind:'Portal', action:()=>setView('sales') },
+  { label:'Finance Portal — invoices & aging', kind:'Portal', action:()=>setView('finance') },
+  { label:'Admin & Analytics', kind:'Portal', action:()=>setView('admin') },
+  { label:'Dispatch & Driver Portal', kind:'Portal', action:()=>setView('dispatch') },
+  { label:'Open pricing rule builder', kind:'Action', action:()=>{ setView('admin'); setTimeout(()=>document.getElementById('ruleBuilderSection')?.scrollIntoView({behavior:'smooth'}),150); } },
+  { label:'Toggle dark mode', kind:'Action', action:()=>toggleTheme() },
+  { label:'Check overdue invoices', kind:'Action', action:()=>setView('finance') },
+];
+let cmdkHi = 0;
+function openCmdk(){
+  document.getElementById('cmdkOverlay').style.display='flex';
+  document.getElementById('cmdkInput').value='';
+  cmdkHi = 0;
+  renderCmdkList('');
+  setTimeout(()=>document.getElementById('cmdkInput').focus(), 30);
+}
+function closeCmdk(){ document.getElementById('cmdkOverlay').style.display='none'; }
+function renderCmdkList(term){
+  const list = CMDK_ITEMS.filter(i=>i.label.toLowerCase().includes(term.toLowerCase()));
+  document.getElementById('cmdkList').innerHTML = list.map((i,idx)=>`
+    <div class="cmdk-item ${idx===cmdkHi?'hi':''}" data-idx="${idx}" onclick="runCmdk(${idx},'${term.replace(/'/g,"\\'")}')">
+      <span>${i.label}</span><span class="k">${i.kind}</span>
+    </div>`).join('') || `<div style="padding:16px;color:var(--muted);font-size:13px;">No matches.</div>`;
+  window._cmdkFiltered = list;
+}
+function runCmdk(idx, term){
+  const list = window._cmdkFiltered || CMDK_ITEMS;
+  const item = list[idx];
+  closeCmdk();
+  if(item) item.action();
+}
+document.addEventListener('keydown', (e)=>{
+  if((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==='k'){
+    e.preventDefault();
+    const overlay = document.getElementById('cmdkOverlay');
+    if(overlay.style.display==='flex') closeCmdk(); else openCmdk();
+  }
+  if(e.key==='Escape') closeCmdk();
+  const overlay = document.getElementById('cmdkOverlay');
+  if(overlay && overlay.style.display==='flex'){
+    const list = window._cmdkFiltered || CMDK_ITEMS;
+    if(e.key==='ArrowDown'){ e.preventDefault(); cmdkHi = Math.min(list.length-1, cmdkHi+1); renderCmdkList(document.getElementById('cmdkInput').value); }
+    if(e.key==='ArrowUp'){ e.preventDefault(); cmdkHi = Math.max(0, cmdkHi-1); renderCmdkList(document.getElementById('cmdkInput').value); }
+    if(e.key==='Enter'){ runCmdk(cmdkHi, document.getElementById('cmdkInput').value); }
+  }
+});
+
+/* ---------------- AI Assistant (rule-based demo) ---------------- */
+let aiHistory = [];
+function toggleAI(){
+  const panel = document.getElementById('aiPanel');
+  const opening = !panel.classList.contains('open');
+  panel.classList.toggle('open');
+  if(opening && aiHistory.length===0){
+    aiSay("Hi, I'm the Karavan AI Assistant. I can check stock, explain pricing, chase invoices, or help you build an order. Try one of these:");
+    renderAiSuggestions(['Is Sprite PET 500ml in stock?','Why is my Gold discount 8%?','What do I owe right now?','Recommend something for a beverages order']);
+  }
+}
+function aiSay(text, from='bot'){
+  aiHistory.push({from, text});
+  const body = document.getElementById('aiBody');
+  const el = document.createElement('div');
+  el.className = 'ai-msg ' + (from==='bot'?'bot':'user');
+  el.textContent = text;
+  body.appendChild(el);
+  body.scrollTop = body.scrollHeight;
+}
+function renderAiSuggestions(list){
+  document.getElementById('aiSuggest').innerHTML = list.map(s=>`<button onclick="sendAI('${s.replace(/'/g,"\\'")}')">${s}</button>`).join('');
+}
+function sendAI(text){
+  text = (text||'').trim();
+  if(!text) return;
+  document.getElementById('aiInput').value='';
+  aiSay(text, 'user');
+  document.getElementById('aiSuggest').innerHTML='';
+  setTimeout(()=>{ aiSay(answerAI(text)); }, 380);
+}
+function answerAI(q){
+  const t = q.toLowerCase();
+  const prod = PRODUCTS.find(p => t.includes(p.name.toLowerCase().split(' ')[0].toLowerCase()));
+  if(t.includes('stock') || t.includes('available')){
+    if(prod) return `${prod.name}: ${prod.stock.available} pieces available, ${prod.stock.reserved} reserved${prod.stock.incoming?`, ${prod.stock.incoming} incoming (ETA ${prod.stock.eta})`:''}.`;
+    return "Tell me a product name (e.g. 'Is Sprite PET 500ml in stock?') and I'll check live inventory across all zones.";
+  }
+  if(t.includes('discount') || t.includes('pricing') || t.includes('price')){
+    return `Your account is Gold tier. Gold customers get category-specific discounts — Beverages and Cleaning currently run 6–8%, applied automatically at checkout before GST.`;
+  }
+  if(t.includes('owe') || t.includes('balance') || t.includes('invoice')){
+    return `Outstanding balance is ${money(CUSTOMER.outstanding)}. INV-5498 (${money(7640.75)}) is overdue — want me to flag it to ${CUSTOMER.salesRep}?`;
+  }
+  if(t.includes('recommend') || t.includes('suggest')){
+    return `Based on order history, I'd add Malta Guinness 330ml (steady demand, full stock) and Dettol Soap (bundle deal this week) to a Beverages/Cleaning order.`;
+  }
+  if(t.includes('order') || t.includes('wizard')){
+    return `I can take you straight to guided ordering — just say "start an order" or use the Guided Ordering tab above.`;
+  }
+  return `I can help with stock levels, pricing explanations, invoice status, and product recommendations — try asking about a specific SKU or your account balance.`;
+}
+
+/* ---------------- Pricing Rule Engine (no-code) ---------------- */
+function renderRuleList(){
+  if(state.rules.length===0) return `<p style="font-size:13px;color:var(--muted);">No rules yet. Add one above.</p>`;
+  return state.rules.map((r,idx)=>`
+    <div class="rule-card">
+      <div class="rule-line">
+        <span class="rule-kw">IF</span>
+        <span class="rule-chip cond">Customer tier = ${r.tier}</span>
+        <span class="rule-kw">AND</span>
+        <span class="rule-chip cond">Quantity ${r.qtyOp} ${r.qtyVal}</span>
+        <span class="rule-kw">AND</span>
+        <span class="rule-chip cond">Region = ${r.region}</span>
+        <span class="rule-kw">THEN</span>
+        <span class="rule-chip then">${r.discount}% discount</span>
+        ${r.freeShipping?'<span class="rule-chip then">Free shipping</span>':''}
+        ${r.priority?'<span class="rule-chip then">Priority fulfilment</span>':''}
+      </div>
+      <div class="rule-actions">
+        <span style="font-size:11px;color:var(--muted);">Rule #${idx+1} · active on all new orders</span>
+        <a href="#" onclick="deleteRule(${idx});return false;" style="font-size:12px;color:var(--red);">Delete</a>
+      </div>
+    </div>
+  `).join('');
+}
+function toggleRuleForm(){ state.showRuleForm = !state.showRuleForm; renderMain(); afterAdmin(); }
+function renderRuleForm(){
+  const d = state.ruleDraft;
+  return `
+  <div class="rule-builder">
+    <div class="rb-row">
+      <span class="rule-kw">IF</span>
+      <select onchange="updateRuleDraft('tier',this.value)">
+        ${['Gold','Silver','Bronze','Any'].map(t=>`<option ${d.tier===t?'selected':''}>${t}</option>`).join('')}
+      </select>
+      <span style="font-size:12px;color:var(--muted);">tier</span>
+      <span class="rule-kw">AND qty</span>
+      <select onchange="updateRuleDraft('qtyOp',this.value)">
+        ${['>','>=','<','<='].map(o=>`<option ${d.qtyOp===o?'selected':''}>${o}</option>`).join('')}
+      </select>
+      <input type="number" value="${d.qtyVal}" style="width:70px;padding:8px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;" oninput="updateRuleDraft('qtyVal',this.value)">
+      <span class="rule-kw">AND region</span>
+      <select onchange="updateRuleDraft('region',this.value)">
+        ${['Any','North','South','East','West','Greater Accra'].map(r=>`<option ${d.region===r?'selected':''}>${r}</option>`).join('')}
+      </select>
+    </div>
+    <div class="rb-row">
+      <span class="rule-kw">THEN discount</span>
+      <input type="number" value="${d.discount}" style="width:60px;padding:8px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;" oninput="updateRuleDraft('discount',this.value)">
+      <span style="font-size:12px;color:var(--muted);">%</span>
+      <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;margin-left:8px;">
+        <input type="checkbox" ${d.freeShipping?'checked':''} onchange="updateRuleDraft('freeShipping',this.checked)"> Free shipping
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;">
+        <input type="checkbox" ${d.priority?'checked':''} onchange="updateRuleDraft('priority',this.checked)"> Priority fulfilment
+      </label>
+    </div>
+    <button class="btn btn-dark btn-sm" onclick="saveRule()">Save rule</button>
+  </div>
+  `;
+}
+function updateRuleDraft(field, val){
+  if(field==='qtyVal' || field==='discount') val = Number(val)||0;
+  state.ruleDraft[field] = val;
+  // intentionally no re-render here so number/text inputs keep focus while typing
+}
+function saveRule(){
+  state.rules.push({...state.ruleDraft});
+  state.showRuleForm = false;
+  toast('⚙️','New pricing rule saved and applied to future orders');
+  renderMain(); afterAdmin();
+}
+function deleteRule(idx){
+  state.rules.splice(idx,1);
+  renderMain(); afterAdmin();
 }

@@ -32,7 +32,24 @@
   --body:'IBM Plex Sans', sans-serif;
 }
 *{box-sizing:border-box;}
-html,body{margin:0;padding:0;}
+html,body{margin:0;padding:0;overflow-x:hidden;}
+html[data-theme="dark"]{
+  --paper:#0E1714; --paper-2:#152420; --card:#132420; --line:#24413A;
+  --text:#EAEFEC; --muted:#8CA098;
+}
+html[data-theme="dark"] body{background:var(--paper);}
+html[data-theme="dark"] .hero{background:#070D0C;}
+html[data-theme="dark"] .eco-section, html[data-theme="dark"] footer.site{background:var(--paper);}
+html[data-theme="dark"] .qb-card, html[data-theme="dark"] .eco-card, html[data-theme="dark"] .card,
+html[data-theme="dark"] .choice-card, html[data-theme="dark"] .prow, html[data-theme="dark"] .review-block,
+html[data-theme="dark"] .uom-btn, html[data-theme="dark"] .price-row, html[data-theme="dark"] .upload-row,
+html[data-theme="dark"] .field select, html[data-theme="dark"] .field input, html[data-theme="dark"] .kcard{
+  background:var(--card); color:var(--text);
+}
+html[data-theme="dark"] section[style*="var(--paper-2)"]{background:var(--paper-2) !important;}
+html[data-theme="dark"] .cart-mini, html[data-theme="dark"] .kcol{background:var(--paper-2);}
+html[data-theme="dark"] .sig-pad{background:var(--paper-2);}
+html[data-theme="dark"] .price-row.total{background:#04100D;}
 body{
   font-family:var(--body);
   background:var(--paper);
@@ -69,11 +86,11 @@ button{font-family:var(--body);cursor:pointer;}
 .brand-name{font-family:var(--display);font-weight:600;font-size:16px;letter-spacing:.2px;}
 .brand-sub{font-size:10px;color:#9AA6A0;letter-spacing:1.5px;text-transform:uppercase;margin-top:-2px;}
 
-.portal-tabs{display:flex;gap:2px;flex:1;overflow-x:auto;scrollbar-width:none;height:100%;}
+.portal-tabs{display:flex;gap:2px;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none;height:100%;}
 .portal-tabs::-webkit-scrollbar{display:none;}
 .ptab{
-  background:none;border:none;color:#AEB8B3;
-  font-size:13px;font-weight:500;padding:0 14px;height:100%;
+  background:none;border:none;color:#AEB8B3;flex-shrink:0;
+  font-size:12.5px;font-weight:500;padding:0 11px;height:100%;
   border-bottom:2px solid transparent;white-space:nowrap;
   display:flex;align-items:center;gap:6px;transition:.15s;
 }
@@ -335,6 +352,79 @@ footer.site{background:var(--ink);color:#9AA6A0;padding:30px 0;font-size:12.5px;
 .chart-box{position:relative;height:220px;}
 .chart-box.tall{height:280px;}
 
+/* ---------------- Toasts ---------------- */
+#toastHost{position:fixed;bottom:20px;right:20px;z-index:400;display:flex;flex-direction:column;gap:10px;align-items:flex-end;}
+.toast{
+  background:var(--ink);color:#F4F3EC;border-radius:8px;padding:12px 16px;font-size:13px;
+  box-shadow:0 8px 24px rgba(0,0,0,.25);display:flex;align-items:center;gap:10px;max-width:340px;
+  animation:toastIn .25s ease-out;
+}
+.toast .ic{font-size:15px;}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+.toast.leaving{animation:toastOut .2s ease-in forwards;}
+@keyframes toastOut{to{opacity:0;transform:translateX(20px);}}
+
+/* ---------------- Theme toggle ---------------- */
+.theme-toggle{
+  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);color:#DEE3E0;
+  border-radius:20px;width:34px;height:30px;font-size:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.theme-toggle:hover{background:rgba(255,255,255,.14);}
+
+/* ---------------- Command palette ---------------- */
+.cmdk-overlay{
+  position:fixed;inset:0;background:rgba(10,16,15,.55);z-index:500;
+  display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;
+}
+.cmdk-box{
+  width:560px;max-width:92vw;background:var(--card);border-radius:12px;overflow:hidden;
+  box-shadow:0 20px 60px rgba(0,0,0,.35);border:1px solid var(--line);
+}
+.cmdk-input{width:100%;border:none;padding:16px 18px;font-size:15px;outline:none;border-bottom:1px solid var(--line);background:var(--card);color:var(--text);font-family:var(--body);}
+.cmdk-list{max-height:340px;overflow-y:auto;padding:6px;}
+.cmdk-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:7px;font-size:13.5px;cursor:pointer;}
+.cmdk-item:hover, .cmdk-item.hi{background:var(--paper-2);}
+.cmdk-item .k{margin-left:auto;font-size:10.5px;color:var(--muted);font-family:var(--mono);}
+.cmdk-hint{padding:9px 16px;font-size:11px;color:var(--muted);border-top:1px solid var(--line);display:flex;gap:14px;}
+
+/* ---------------- AI Assistant ---------------- */
+.ai-fab{
+  position:fixed;bottom:24px;right:24px;z-index:300;
+  width:54px;height:54px;border-radius:50%;background:linear-gradient(135deg,var(--orange),var(--orange-dark));
+  color:#fff;border:none;font-size:22px;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 8px 20px rgba(255,106,26,.35);
+}
+.ai-fab:hover{transform:translateY(-2px);}
+.ai-panel{
+  position:fixed;bottom:90px;right:24px;z-index:300;width:360px;max-width:90vw;height:480px;max-height:70vh;
+  background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.3);
+  display:none;flex-direction:column;overflow:hidden;
+}
+.ai-panel.open{display:flex;}
+.ai-head{background:var(--ink);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;}
+.ai-head .pulse{width:7px;height:7px;border-radius:50%;background:#3EBF9A;}
+.ai-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;}
+.ai-msg{max-width:85%;padding:9px 12px;border-radius:10px;font-size:13px;line-height:1.45;}
+.ai-msg.bot{background:var(--paper-2);align-self:flex-start;border-bottom-left-radius:3px;}
+.ai-msg.user{background:var(--orange);color:#fff;align-self:flex-end;border-bottom-right-radius:3px;}
+.ai-suggest{display:flex;flex-wrap:wrap;gap:6px;padding:0 14px 12px;}
+.ai-suggest button{background:var(--paper-2);border:1px solid var(--line);border-radius:14px;padding:6px 11px;font-size:11.5px;}
+.ai-input-row{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line);}
+.ai-input-row input{flex:1;border:1px solid var(--line);border-radius:20px;padding:9px 14px;font-size:13px;background:var(--paper);color:var(--text);}
+.ai-input-row button{background:var(--orange);color:#fff;border:none;border-radius:50%;width:34px;height:34px;flex-shrink:0;}
+
+/* ---------------- Rule builder ---------------- */
+.rule-card{border:1px solid var(--line);border-radius:10px;padding:16px 18px;background:var(--card);margin-bottom:10px;}
+.rule-line{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:13px;}
+.rule-chip{background:var(--paper-2);border-radius:6px;padding:4px 9px;font-weight:600;font-family:var(--mono);font-size:12px;}
+.rule-chip.cond{color:var(--teal);}
+.rule-chip.then{color:var(--orange);}
+.rule-kw{color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;}
+.rule-actions{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);display:flex;justify-content:space-between;align-items:center;}
+.rule-builder{border:1.5px dashed var(--line);border-radius:10px;padding:18px;background:var(--paper-2);}
+.rb-row{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;}
+.rb-row select{padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;background:var(--card);}
+
 /* responsive */
 @media (max-width:980px){
   .wizard-shell{grid-template-columns:1fr;}
@@ -362,7 +452,9 @@ footer.site{background:var(--ink);color:#9AA6A0;padding:30px 0;font-size:12.5px;
     </div>
     <div class="portal-tabs" id="portalTabs"></div>
     <div class="topbar-right">
+      <button class="pill" id="cmdkOpener" style="border:none;cursor:pointer;" onclick="openCmdk()">🔍 Search <span class="mono" style="opacity:.7;">⌘K</span></button>
       <div class="pill"><span class="dot" style="width:6px;height:6px;border-radius:50%;background:#3EBF9A;display:inline-block;"></span> Live sync</div>
+      <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle dark mode">🌙</button>
       <div class="avatar">KR</div>
     </div>
   </div>
@@ -373,6 +465,27 @@ footer.site{background:var(--ink);color:#9AA6A0;padding:30px 0;font-size:12.5px;
     Karavan OS — Enterprise B2B Commerce &amp; Distribution Platform · Prototype build · Not for production data
   </footer>
 
+</div>
+
+<div id="toastHost"></div>
+
+<button class="ai-fab" id="aiFab" onclick="toggleAI()" title="Ask the Karavan AI Assistant">✦</button>
+<div class="ai-panel" id="aiPanel">
+  <div class="ai-head"><span class="pulse"></span> Karavan AI Assistant</div>
+  <div class="ai-body" id="aiBody"></div>
+  <div class="ai-suggest" id="aiSuggest"></div>
+  <div class="ai-input-row">
+    <input type="text" id="aiInput" placeholder="Ask about stock, pricing, invoices…" onkeydown="if(event.key==='Enter')sendAI(this.value)">
+    <button onclick="sendAI(document.getElementById('aiInput').value)">→</button>
+  </div>
+</div>
+
+<div class="cmdk-overlay" id="cmdkOverlay" style="display:none;" onclick="if(event.target===this)closeCmdk()">
+  <div class="cmdk-box">
+    <input type="text" class="cmdk-input" id="cmdkInput" placeholder="Jump to a portal or action…" oninput="renderCmdkList(this.value)">
+    <div class="cmdk-list" id="cmdkList"></div>
+    <div class="cmdk-hint"><span>↑↓ navigate</span><span>↵ select</span><span>esc close</span></div>
+  </div>
 </div>
 
 <script src="app.js"></script>
