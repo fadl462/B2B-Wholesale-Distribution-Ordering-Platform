@@ -124,18 +124,38 @@ const DELIVERIES = [
   { id:'ORD-88190', nm:'Blessed Mart', addr:'Dansoman', win:'11:00 AM–1:00 PM', status:'Delivered' },
 ];
 
+/* ---------------- Roles (RBAC) ---------------- */
+const ROLES = {
+  admin:     { label:'Admin (Full access)', initials:'KR', portals:['marketing','customer','wizard','warehouse','sales','finance','admin','dispatch'] },
+  customer:  { label:'Customer — Adjei Retail', initials:'AR', portals:['marketing','customer','wizard'] },
+  sales:     { label:'Sales Rep — Kojo M.', initials:'KM', portals:['marketing','sales','customer'] },
+  warehouse: { label:'Warehouse Staff', initials:'WH', portals:['marketing','warehouse','dispatch'] },
+  finance:   { label:'Finance Team', initials:'FN', portals:['marketing','finance','admin'] },
+};
+
+const NOTIF_SEED = [
+  { icon:'⚠️', text:'INV-5498 is overdue by 2 days', time:'2h ago' },
+  { icon:'📦', text:'ORD-88190 is in transit — arriving today', time:'4h ago' },
+  { icon:'🔔', text:'New negotiated rate card applied to Beverages', time:'1d ago' },
+  { icon:'📉', text:'Sprite PET 500ml has dropped below reorder threshold', time:'1d ago' },
+];
+
 /* ---------------- State ---------------- */
 
 const state = {
   view: 'marketing',
   pulseStarted:false,
   showRuleForm:false,
+  role: 'admin',
+  notifPanelOpen:false,
   ruleDraft:{ tier:'Gold', qtyOp:'>', qtyVal:100, region:'North', discount:12, freeShipping:true, priority:true },
   rules:[
     { tier:'Gold', qtyOp:'>', qtyVal:100, region:'North', discount:12, freeShipping:true, priority:true },
     { tier:'Silver', qtyOp:'>=', qtyVal:50, region:'Any', discount:6, freeShipping:false, priority:false },
     { tier:'Gold', qtyOp:'>', qtyVal:20, region:'Any', discount:8, freeShipping:false, priority:true },
   ],
+  notifications: NOTIF_SEED.map((n,i)=>({ id:'n'+i, ...n, read:false })),
+  invoiceModal: null,
   wizard: {
     step: 0, // index into WIZARD_STEPS
     business: { branch:'osu', location:'Oxford Street, Osu, Accra', rep:'Kojo Mensah' },
@@ -148,7 +168,19 @@ const state = {
     signed:false,
     poAttached:false,
     orderNum:null,
+    creditOverride:false,
   }
+};
+
+const FINANCE_INVOICES = [
+  { id:'INV-5521', order:'ORD-88213', customer:'Adjei Retail Stores', due:'07 Aug 2026', amount:4820.50, status:'Outstanding' },
+  { id:'INV-5498', order:'ORD-88155', customer:'Adjei Retail Stores', due:'26 Jul 2026', amount:7640.75, status:'Overdue' },
+  { id:'INV-5502', order:'ORD-88301', customer:'Nyame Foods Ltd', due:'02 Aug 2026', amount:31200,   status:'Outstanding' },
+  { id:'INV-5460', order:'ORD-88090', customer:'Blessed Mart', due:'10 Jul 2026', amount:3200,     status:'Paid' },
+];
+
+const HSN_CODES = {
+  beverages:'2202.10', snacks:'1905.90', medical:'3004.90', cleaning:'3402.20', frozen:'0207.14'
 };
 
 const WIZARD_STEPS = [
@@ -169,13 +201,36 @@ function esc(s){ return String(s); }
 /* ---------------- Shell / Router ---------------- */
 
 function renderTabs(){
+  const allowed = ROLES[state.role].portals;
+  const visible = PORTALS.filter(p=>allowed.includes(p.id));
   const el = document.getElementById('portalTabs');
-  el.innerHTML = PORTALS.map(p => `
+  el.innerHTML = visible.map(p => `
     <button class="ptab ${state.view===p.id?'active':''}" data-view="${p.id}">${p.label}</button>
   `).join('');
   el.querySelectorAll('.ptab').forEach(btn=>{
     btn.addEventListener('click', ()=> setView(btn.dataset.view));
   });
+
+  const roleSel = document.getElementById('roleSelect');
+  if(roleSel){
+    roleSel.innerHTML = Object.keys(ROLES).map(id=>`<option value="${id}" ${state.role===id?'selected':''}>${ROLES[id].label}</option>`).join('');
+  }
+  const avatar = document.getElementById('avatarBadge');
+  if(avatar) avatar.textContent = ROLES[state.role].initials;
+
+  renderNotifPanel();
+}
+
+function setRole(id){
+  state.role = id;
+  const allowed = ROLES[id].portals;
+  if(!allowed.includes(state.view)){
+    setView(allowed[0]);
+  } else {
+    renderTabs();
+  }
+  toast('👤', `Switched to ${ROLES[id].label} view — only permitted portals are shown.`);
+  persist();
 }
 
 function setView(view){
@@ -198,9 +253,11 @@ function renderMain(){
     case 'admin':     main.innerHTML = viewAdmin(); afterAdmin(); break;
     case 'dispatch':  main.innerHTML = viewDispatch(); break;
   }
+  persist();
 }
 
 document.addEventListener('DOMContentLoaded', ()=>{
+  loadPersisted();
   renderTabs();
   renderMain();
 });
@@ -367,7 +424,10 @@ function viewCustomer(){
       <div class="card">
         <div class="flex-between" style="margin-bottom:10px;">
           <div class="card-title" style="margin:0;">Recent orders</div>
-          <a href="#" style="font-size:12.5px;color:var(--orange);font-weight:600;">View all</a>
+          <div style="display:flex;gap:12px;align-items:center;">
+            <button class="btn btn-ghost btn-sm" onclick="exportOrdersCSV()">⬇ Export CSV</button>
+            <a href="#" style="font-size:12.5px;color:var(--orange);font-weight:600;">View all</a>
+          </div>
         </div>
         <table>
           <thead><tr><th>Order</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th></tr></thead>
@@ -409,7 +469,7 @@ function viewCustomer(){
       <div class="card">
         <div class="card-title">Invoices</div>
         <table>
-          <thead><tr><th>Invoice</th><th>Order</th><th>Due</th><th>Amount</th><th>Status</th></tr></thead>
+          <thead><tr><th>Invoice</th><th>Order</th><th>Due</th><th>Amount</th><th>Status</th><th></th></tr></thead>
           <tbody>
             ${INVOICES.map(i=>`
               <tr>
@@ -418,6 +478,7 @@ function viewCustomer(){
                 <td>${i.due}</td>
                 <td>${money(i.amount)}</td>
                 <td>${statusBadge(i.status)}</td>
+                <td><a href="#" onclick='openInvoiceFromRecord(${JSON.stringify(i)});return false;' style="font-size:12px;color:var(--orange);font-weight:600;">View</a></td>
               </tr>
             `).join('')}
           </tbody>
@@ -799,12 +860,30 @@ function validationLabel(k){
 
 /* Step: Submit */
 function stepSubmit(){
+  const subtotal = cartSubtotal();
+  const tax = subtotal * TAX_RATE;
+  const total = subtotal + tax + DELIVERY_FEE;
+  const projectedBalance = CUSTOMER.outstanding + total;
+  const overLimit = projectedBalance > CUSTOMER.creditLimit;
+  const blocked = overLimit && !w().creditOverride;
+
   return `
   <div class="step-eyebrow">Step 6 of 7</div>
   <div class="step-title">Sign &amp; submit</div>
   <p class="step-hint">A digital signature and optional purchase order attachment close out the order — matching how your team already confirms orders on paper.</p>
 
-  <div class="review-block">
+  ${overLimit ? `
+    <div class="credit-hold">
+      <h5>🚫 Credit hold — order exceeds available limit</h5>
+      <p>This order would bring your balance to ${money(projectedBalance)}, against a ${money(CUSTOMER.creditLimit)} limit
+      (${money(CUSTOMER.creditLimit - CUSTOMER.outstanding)} currently available). Orders on hold can't be submitted without sales rep approval.</p>
+      ${w().creditOverride
+        ? `<span class="badge green">✓ Approved by ${CUSTOMER.salesRep}</span>`
+        : `<button class="btn btn-dark btn-sm" onclick="requestCreditOverride()">Request approval from ${CUSTOMER.salesRep}</button>`}
+    </div>
+  ` : ''}
+
+  <div class="review-block" style="margin-top:18px;">
     <h5>Digital signature</h5>
     <div class="sig-pad ${w().signed?'signed':''}" onclick="toggleSign()">
       ${w().signed ? 'Kwame Adjei' : 'Click to sign on behalf of ' + CUSTOMER.name}
@@ -823,15 +902,26 @@ function stepSubmit(){
 
   <div class="wizard-nav">
     <button class="btn btn-ghost" onclick="goStep('review')">← Back to review</button>
-    <button class="btn btn-primary" ${w().signed?'':'disabled'} onclick="submitOrder()">Submit order →</button>
+    <button class="btn btn-primary" ${(w().signed && !blocked)?'':'disabled'} onclick="submitOrder()">Submit order →</button>
   </div>
   `;
+}
+function requestCreditOverride(){
+  toast('⏳', `Requesting approval from ${CUSTOMER.salesRep}…`);
+  setTimeout(()=>{
+    w().creditOverride = true;
+    addNotification('✅', `${CUSTOMER.salesRep} approved a credit hold override for your order`);
+    toast('✅', `${CUSTOMER.salesRep} approved the credit hold — you can now submit.`);
+    renderMain(); afterWizard();
+  }, 1100);
 }
 function toggleSign(){ w().signed = !w().signed; renderMain(); afterWizard(); }
 function attachPO(){ w().poAttached = true; renderMain(); afterWizard(); }
 
 function submitOrder(){
   w().orderNum = 'ORD-' + Math.floor(80000 + Math.random()*9999);
+  addNotification('📦', `Order ${w().orderNum} confirmed and inventory reserved`);
+  persist();
   goStep('confirm');
 }
 
@@ -860,7 +950,7 @@ function stepConfirm(){
   <div class="wizard-nav">
     <button class="btn btn-ghost" onclick="setView('dispatch')">Track order →</button>
     <div style="display:flex;gap:10px;">
-      <button class="btn btn-ghost" onclick="toast('📄','Invoice PDF generated for ${w().orderNum}')">Download invoice PDF</button>
+      <button class="btn btn-ghost" onclick="openInvoiceFromCart('${w().orderNum}', w().cart, ${subtotal}, ${tax}, ${DELIVERY_FEE}, ${total})">View / print invoice</button>
       <button class="btn btn-primary" onclick="resetWizard()">Start new order</button>
     </div>
   </div>
@@ -870,8 +960,9 @@ function resetWizard(){
   state.wizard = {
     step:0, business:{ branch:'osu', location:'Oxford Street, Osu, Accra', rep:'Kojo Mensah' },
     category:null, product:null, uom:'piece', qty:1, validationChoice:null,
-    cart:[], signed:false, poAttached:false, orderNum:null
+    cart:[], signed:false, poAttached:false, orderNum:null, creditOverride:false
   };
+  persist();
   renderMain(); afterWizard();
 }
 
@@ -1029,14 +1120,20 @@ function viewFinance(){
     </div>
 
     <div class="card" style="margin-top:16px;">
-      <div class="card-title">Recent invoices</div>
+      <div class="flex-between" style="margin-bottom:8px;">
+        <div class="card-title" style="margin:0;">Recent invoices</div>
+        <button class="btn btn-ghost btn-sm" onclick="exportInvoicesCSV()">⬇ Export CSV</button>
+      </div>
       <table>
-        <thead><tr><th>Invoice</th><th>Customer</th><th>Due</th><th>Amount</th><th>Status</th></tr></thead>
+        <thead><tr><th>Invoice</th><th>Customer</th><th>Due</th><th>Amount</th><th>Status</th><th></th></tr></thead>
         <tbody>
-          <tr><td class="mono">INV-5521</td><td>Adjei Retail Stores</td><td>07 Aug 2026</td><td>${money(4820.50)}</td><td>${statusBadge('Outstanding')}</td></tr>
-          <tr><td class="mono">INV-5498</td><td>Adjei Retail Stores</td><td>26 Jul 2026</td><td>${money(7640.75)}</td><td>${statusBadge('Overdue')}</td></tr>
-          <tr><td class="mono">INV-5502</td><td>Nyame Foods Ltd</td><td>02 Aug 2026</td><td>${money(31200)}</td><td>${statusBadge('Outstanding')}</td></tr>
-          <tr><td class="mono">INV-5460</td><td>Blessed Mart</td><td>10 Jul 2026</td><td>${money(3200)}</td><td>${statusBadge('Paid')}</td></tr>
+          ${FINANCE_INVOICES.map(i=>`
+            <tr>
+              <td class="mono">${i.id}</td><td>${i.customer}</td><td>${i.due}</td><td>${money(i.amount)}</td>
+              <td>${statusBadge(i.status)}</td>
+              <td><a href="#" onclick='openInvoiceFromRecord(${JSON.stringify(i)});return false;' style="font-size:12px;color:var(--orange);font-weight:600;">View</a></td>
+            </tr>
+          `).join('')}
         </tbody>
       </table>
     </div>
@@ -1406,4 +1503,190 @@ function saveRule(){
 function deleteRule(idx){
   state.rules.splice(idx,1);
   renderMain(); afterAdmin();
+}
+
+/* ---------------- Persistence (localStorage) ---------------- */
+const PERSIST_KEY = 'karavan_os_state_v1';
+function persist(){
+  try{
+    const theme = document.documentElement.getAttribute('data-theme') || 'light';
+    localStorage.setItem(PERSIST_KEY, JSON.stringify({
+      theme, role: state.role, rules: state.rules,
+      notifications: state.notifications, wizard: state.wizard,
+    }));
+  }catch(e){ /* storage unavailable — fail silently, app still works in-memory */ }
+}
+function loadPersisted(){
+  try{
+    const raw = localStorage.getItem(PERSIST_KEY);
+    if(!raw) return;
+    const saved = JSON.parse(raw);
+    if(saved.theme==='dark'){
+      document.documentElement.setAttribute('data-theme','dark');
+      const tt = document.getElementById('themeToggle'); if(tt) tt.textContent = '☀️';
+    }
+    if(saved.role && ROLES[saved.role]) state.role = saved.role;
+    if(Array.isArray(saved.rules) && saved.rules.length) state.rules = saved.rules;
+    if(Array.isArray(saved.notifications) && saved.notifications.length) state.notifications = saved.notifications;
+    if(saved.wizard){
+      state.wizard = Object.assign({}, state.wizard, saved.wizard);
+      if(Array.isArray(state.wizard.cart)){
+        state.wizard.cart = state.wizard.cart.map(c => ({ ...c, product: PRODUCTS.find(p=>p.id===c.product.id) || c.product }));
+      }
+      if(state.wizard.product){
+        state.wizard.product = PRODUCTS.find(p=>p.id===state.wizard.product.id) || null;
+      }
+      if(!state.wizard.product && WIZARD_STEPS[state.wizard.step] && WIZARD_STEPS[state.wizard.step].key==='configure'){
+        state.wizard.step = stepIndex('category');
+      }
+    }
+  }catch(e){ /* corrupt storage — ignore and start fresh */ }
+}
+
+/* ---------------- Notification center ---------------- */
+function addNotification(icon, text){
+  state.notifications.unshift({ id:'n'+Date.now(), icon, text, time:'just now', read:false });
+  renderNotifPanel();
+  persist();
+}
+function toggleNotifPanel(){
+  state.notifPanelOpen = !state.notifPanelOpen;
+  renderNotifPanel();
+}
+function renderNotifPanel(){
+  const panel = document.getElementById('notifPanel');
+  const badge = document.getElementById('notifBadge');
+  if(!panel || !badge) return;
+  const unread = state.notifications.filter(n=>!n.read).length;
+  badge.style.display = unread>0 ? 'flex' : 'none';
+  badge.textContent = unread>9 ? '9+' : String(unread);
+  panel.classList.toggle('open', state.notifPanelOpen);
+  panel.innerHTML = `
+    <div class="notif-panel-head"><span>Notifications</span><a onclick="markAllRead()">Mark all read</a></div>
+    ${state.notifications.length===0 ? '<div class="notif-empty">No notifications</div>' :
+      state.notifications.map(n=>`
+        <div class="notif-row ${n.read?'':'unread'}" onclick="markRead('${n.id}')">
+          <span>${n.icon}</span>
+          <div><div>${n.text}</div><div class="t">${n.time}</div></div>
+        </div>
+      `).join('')}
+  `;
+}
+function markRead(id){
+  const n = state.notifications.find(x=>x.id===id);
+  if(n) n.read = true;
+  renderNotifPanel();
+  persist();
+}
+function markAllRead(){
+  state.notifications.forEach(n=>n.read=true);
+  renderNotifPanel();
+  persist();
+}
+document.addEventListener('click', (e)=>{
+  const wrap = document.querySelector('.notif-wrap');
+  if(state.notifPanelOpen && wrap && !wrap.contains(e.target)){
+    state.notifPanelOpen = false;
+    renderNotifPanel();
+  }
+});
+
+/* ---------------- GST Invoice document ---------------- */
+function openInvoiceFromCart(orderNum, cart, subtotal, tax, delivery, total){
+  const lines = cart.map(c => ({
+    name:c.product.name, hsn:HSN_CODES[c.product.cat]||'—', qty:c.pieces, rate:c.product.price,
+    amount:c.lineSubtotal, discount:c.discountAmt, net:c.afterDiscount
+  }));
+  renderInvoice({ orderNum, lines, subtotal, tax, delivery, total, date:new Date() });
+}
+function openInvoiceFromRecord(inv){
+  const subtotal = inv.amount / (1+TAX_RATE);
+  const tax = inv.amount - subtotal;
+  renderInvoice({
+    orderNum:inv.order, invoiceId:inv.id, lines:[{ name:'Wholesale order — mixed line items', hsn:'—', qty:'—', rate:'—', amount:subtotal, discount:0, net:subtotal }],
+    subtotal, tax, delivery:0, total:inv.amount, date:new Date(), due:inv.due
+  });
+}
+function renderInvoice(data){
+  const irn = 'IRN' + Math.random().toString(36).slice(2,10).toUpperCase();
+  const ewb = 'EWB' + Math.floor(1e11 + Math.random()*8e11);
+  const body = document.getElementById('invoiceModalBody');
+  body.innerHTML = `
+  <div class="invoice-doc">
+    <div class="inv-top">
+      <div>
+        <div class="inv-brand">Karavan OS</div>
+        <div style="font-size:11.5px;color:#555;">Tema Central Warehouse, Ghana · GST/VAT Reg: GH-0041-2019</div>
+      </div>
+      <div class="inv-meta">
+        <div><b>Tax Invoice</b></div>
+        <div>${data.invoiceId ? data.invoiceId : 'INV-' + data.orderNum.replace('ORD-','')}</div>
+        <div>Order ${data.orderNum}</div>
+        <div>${data.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}</div>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px;">
+      <div><b>Billed to</b><br>${CUSTOMER.name} — ${CUSTOMER.branch}<br>${w().business ? w().business.location : ''}</div>
+      <div style="text-align:right;"><b>IRN</b> ${irn}<br><b>E-way bill</b> ${ewb}${data.due?`<br><b>Due</b> ${data.due}`:''}</div>
+    </div>
+
+    <h2>Line items</h2>
+    <table>
+      <thead><tr><th>Description</th><th>HSN</th><th>Qty (pcs)</th><th>Rate</th><th>Amount</th><th>Discount</th><th>Net</th></tr></thead>
+      <tbody>
+        ${data.lines.map(l=>`
+          <tr>
+            <td>${l.name}</td><td>${l.hsn}</td><td>${l.qty}</td>
+            <td>${typeof l.rate==='number'?money(l.rate):l.rate}</td>
+            <td>${money(l.amount)}</td><td>${l.discount?('− '+money(l.discount)):'—'}</td><td>${money(l.net)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+
+    <div class="inv-totals">
+      <div><span>Subtotal</span><span>${money(data.subtotal)}</span></div>
+      <div><span>GST (${Math.round(TAX_RATE*100)}%)</span><span>${money(data.tax)}</span></div>
+      ${data.delivery ? `<div><span>Delivery</span><span>${money(data.delivery)}</span></div>` : ''}
+      <div class="grand"><span>Total due</span><span>${money(data.total)}</span></div>
+    </div>
+
+    <div class="inv-footer">
+      This is a system-generated tax invoice from Karavan OS. Two-way synced to Tally ERP. Bank details and payment terms available on request. Prototype data — not a real transaction.
+    </div>
+  </div>
+  <div class="invoice-actions">
+    <button class="btn btn-ghost" onclick="closeInvoice()">Close</button>
+    <button class="btn btn-primary" onclick="window.print()">🖨️ Print / Save as PDF</button>
+  </div>
+  `;
+  document.getElementById('invoiceOverlay').style.display = 'flex';
+}
+function closeInvoice(){ document.getElementById('invoiceOverlay').style.display = 'none'; }
+
+/* ---------------- CSV export ---------------- */
+function downloadCSV(filename, rows){
+  const csv = rows.map(r => r.map(cell => {
+    const s = String(cell ?? '');
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+  }).join(',')).join('\n');
+  const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function exportInvoicesCSV(){
+  const rows = [['Invoice','Customer','Order','Due date','Amount (GHS)','Status']];
+  FINANCE_INVOICES.forEach(i => rows.push([i.id, i.customer, i.order, i.due, i.amount.toFixed(2), i.status]));
+  downloadCSV('karavan-invoices.csv', rows);
+  toast('⬇️','Invoices exported as CSV');
+}
+function exportOrdersCSV(){
+  const rows = [['Order','Date','Items','Total (GHS)','Status']];
+  RECENT_ORDERS.forEach(o => rows.push([o.id, o.date, o.items, o.total.toFixed(2), o.status]));
+  downloadCSV('karavan-orders.csv', rows);
+  toast('⬇️','Orders exported as CSV');
 }

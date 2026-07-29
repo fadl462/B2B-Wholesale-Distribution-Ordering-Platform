@@ -425,6 +425,56 @@ footer.site{background:var(--ink);color:#9AA6A0;padding:30px 0;font-size:12.5px;
 .rb-row{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;}
 .rb-row select{padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;background:var(--card);}
 
+/* ---------------- Role select & notifications ---------------- */
+.role-select{
+  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);color:#DEE3E0;
+  border-radius:20px;padding:5px 10px;font-size:11.5px;flex-shrink:0;max-width:160px;
+}
+.notif-wrap{position:relative;flex-shrink:0;}
+.notif-badge{
+  position:absolute;top:-2px;right:-2px;background:var(--red);color:#fff;font-size:9px;font-weight:700;
+  border-radius:8px;min-width:15px;height:15px;display:flex;align-items:center;justify-content:center;padding:0 3px;
+}
+.notif-panel{
+  display:none;position:absolute;top:42px;right:0;width:320px;background:var(--card);border:1px solid var(--line);
+  border-radius:10px;box-shadow:0 16px 40px rgba(0,0,0,.25);z-index:250;max-height:400px;overflow-y:auto;
+}
+.notif-panel.open{display:block;}
+.notif-panel-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);font-size:12.5px;font-weight:600;color:var(--text);}
+.notif-panel-head a{font-size:11.5px;color:var(--orange);font-weight:600;cursor:pointer;}
+.notif-row{display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line);font-size:12.5px;cursor:pointer;color:var(--text);}
+.notif-row:last-child{border-bottom:none;}
+.notif-row.unread{background:var(--teal-light);}
+.notif-row .t{color:var(--muted);font-size:10.5px;margin-top:2px;}
+.notif-empty{padding:24px;text-align:center;color:var(--muted);font-size:12.5px;}
+
+/* ---------------- Credit hold ---------------- */
+.credit-hold{border:1.5px solid var(--red);background:var(--red-light);border-radius:9px;padding:16px 18px;margin-top:16px;}
+.credit-hold h5{margin:0 0 6px;font-size:13.5px;color:#7A2A1D;}
+.credit-hold p{margin:0 0 12px;font-size:13px;color:#7A2A1D;line-height:1.5;}
+
+/* ---------------- Invoice document ---------------- */
+.invoice-modal{background:#fff;color:#111;width:720px;max-width:92vw;max-height:86vh;overflow-y:auto;border-radius:10px;}
+.invoice-doc{padding:36px 40px;font-family:var(--body);}
+.invoice-doc .inv-top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #12201D;padding-bottom:18px;margin-bottom:18px;}
+.invoice-doc .inv-brand{font-family:var(--display);font-size:20px;font-weight:700;}
+.invoice-doc .inv-meta{text-align:right;font-size:12px;color:#555;line-height:1.6;}
+.invoice-doc h2{font-size:15px;margin:20px 0 8px;}
+.invoice-doc table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px;}
+.invoice-doc th{background:#F2F1EA;text-align:left;padding:7px 8px;border:1px solid #DDD;}
+.invoice-doc td{padding:7px 8px;border:1px solid #DDD;}
+.invoice-doc .inv-totals{width:280px;margin-left:auto;font-size:12.5px;}
+.invoice-doc .inv-totals div{display:flex;justify-content:space-between;padding:5px 0;}
+.invoice-doc .inv-totals .grand{border-top:2px solid #12201D;font-weight:700;font-size:14px;padding-top:8px;}
+.invoice-doc .inv-footer{margin-top:24px;padding-top:14px;border-top:1px solid #DDD;font-size:11px;color:#777;}
+.invoice-actions{position:sticky;bottom:0;background:#fff;padding:14px 40px;border-top:1px solid #DDD;display:flex;justify-content:space-between;}
+@media print{
+  body *{visibility:hidden;}
+  .invoice-doc, .invoice-doc *{visibility:visible;}
+  .invoice-doc{position:absolute;top:0;left:0;width:100%;}
+  .invoice-actions{display:none;}
+}
+
 /* responsive */
 @media (max-width:980px){
   .wizard-shell{grid-template-columns:1fr;}
@@ -453,9 +503,13 @@ footer.site{background:var(--ink);color:#9AA6A0;padding:30px 0;font-size:12.5px;
     <div class="portal-tabs" id="portalTabs"></div>
     <div class="topbar-right">
       <button class="pill" id="cmdkOpener" style="border:none;cursor:pointer;" onclick="openCmdk()">🔍 Search <span class="mono" style="opacity:.7;">⌘K</span></button>
-      <div class="pill"><span class="dot" style="width:6px;height:6px;border-radius:50%;background:#3EBF9A;display:inline-block;"></span> Live sync</div>
+      <select id="roleSelect" class="role-select" onchange="setRole(this.value)"></select>
+      <div class="notif-wrap">
+        <button class="theme-toggle" id="notifBell" onclick="toggleNotifPanel()" title="Notifications">🔔<span class="notif-badge" id="notifBadge" style="display:none;"></span></button>
+        <div class="notif-panel" id="notifPanel"></div>
+      </div>
       <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle dark mode">🌙</button>
-      <div class="avatar">KR</div>
+      <div class="avatar" id="avatarBadge">KR</div>
     </div>
   </div>
 
@@ -486,6 +540,10 @@ footer.site{background:var(--ink);color:#9AA6A0;padding:30px 0;font-size:12.5px;
     <div class="cmdk-list" id="cmdkList"></div>
     <div class="cmdk-hint"><span>↑↓ navigate</span><span>↵ select</span><span>esc close</span></div>
   </div>
+</div>
+
+<div class="cmdk-overlay" id="invoiceOverlay" style="display:none;" onclick="if(event.target===this)closeInvoice()">
+  <div class="invoice-modal" id="invoiceModalBody"></div>
 </div>
 
 <script src="app.js"></script>
