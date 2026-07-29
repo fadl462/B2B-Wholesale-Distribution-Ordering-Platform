@@ -32,7 +32,7 @@
   --body:'IBM Plex Sans', sans-serif;
 }
 *{box-sizing:border-box;}
-html,body{margin:0;padding:0;overflow-x:hidden;}
+html,body{margin:0;padding:0;}
 html[data-theme="dark"]{
   --paper:#0E1714; --paper-2:#152420; --card:#132420; --line:#24413A;
   --text:#EAEFEC; --muted:#8CA098;
@@ -75,6 +75,18 @@ button{font-family:var(--body);cursor:pointer;}
   flex-shrink:0;
   border-bottom:1px solid rgba(255,255,255,.08);
   position:sticky;top:0;z-index:100;
+  transition:height .22s ease, box-shadow .22s ease, padding .22s ease;
+}
+.topbar.compact{
+  height:46px;
+  box-shadow:0 6px 20px rgba(0,0,0,.22);
+}
+.topbar.compact .brand-mark{width:23px;height:23px;font-size:12px;}
+.topbar.compact .brand-name{font-size:14px;}
+.topbar.compact .brand-sub{font-size:9px;}
+.topbar.compact .ptab{font-size:12px;}
+.topbar .brand-mark, .topbar .brand-name, .topbar .brand-sub, .topbar .ptab{
+  transition:all .22s ease;
 }
 .brand{display:flex;align-items:center;gap:10px;margin-right:28px;flex-shrink:0;}
 .brand-mark{
@@ -122,6 +134,8 @@ main{flex:1;}
   padding:18px 20px;
 }
 .card-title{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600;margin:0 0 4px;}
+.kpi-clickable{cursor:pointer;transition:.15s;}
+.kpi-clickable:hover{border-color:var(--orange);box-shadow:0 4px 14px rgba(0,0,0,.06);transform:translateY(-1px);}
 .kpi-value{font-family:var(--display);font-size:28px;font-weight:600;margin:2px 0;}
 .kpi-delta{font-size:12px;font-weight:600;}
 .kpi-delta.up{color:var(--teal);}
@@ -336,7 +350,8 @@ footer.site{background:var(--ink);color:#9AA6A0;padding:30px 0;font-size:12.5px;
 .wh-zone{border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--card);cursor:default;}
 .wh-zone .zn{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
 .wh-zone .bins{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;}
-.wh-zone .bin{height:16px;border-radius:2px;background:var(--paper-2);}
+.wh-zone .bin{height:16px;border-radius:2px;background:var(--paper-2);cursor:pointer;transition:.1s;}
+.wh-zone .bin:hover{outline:2px solid var(--orange);outline-offset:1px;}
 .wh-zone .bin.full{background:var(--teal);}
 .wh-zone .bin.low{background:var(--amber);}
 .wh-zone .bin.empty{background:var(--red-light);border:1px solid var(--red);}
@@ -482,10 +497,24 @@ footer.site{background:var(--ink);color:#9AA6A0;padding:30px 0;font-size:12.5px;
   .kpi-row,.two-col,.three-col,.eco-grid,.qb-grid,.choice-grid,.attr-grid{grid-template-columns:1fr 1fr;}
   .hero h1{font-size:34px;}
 }
+@media (max-width:900px){
+  .role-select{max-width:110px;font-size:10.5px;padding:5px 8px;}
+  .topbar-right{gap:8px;}
+}
 @media (max-width:640px){
   .kpi-row,.two-col,.three-col,.eco-grid,.qb-grid,.choice-grid,.attr-grid{grid-template-columns:1fr;}
   .wh-map{grid-template-columns:repeat(2,1fr);}
   .hero{padding:50px 0 40px;}
+  .pill-label, .pill-kbd{display:none;}
+  #cmdkOpener{padding:6px 9px;}
+  .role-select{display:none;}
+  .topbar-right{gap:6px;}
+  .brand-sub{display:none;}
+}
+@media (max-width:380px){
+  .topbar{padding:0 10px;}
+  .brand{margin-right:10px;}
+  .brand-name{display:none;}
 }
 </style>
 </head>
@@ -502,7 +531,7 @@ footer.site{background:var(--ink);color:#9AA6A0;padding:30px 0;font-size:12.5px;
     </div>
     <div class="portal-tabs" id="portalTabs"></div>
     <div class="topbar-right">
-      <button class="pill" id="cmdkOpener" style="border:none;cursor:pointer;" onclick="openCmdk()">🔍 Search <span class="mono" style="opacity:.7;">⌘K</span></button>
+      <button class="pill" id="cmdkOpener" style="border:none;cursor:pointer;" onclick="openCmdk()">🔍<span class="pill-label"> Search</span> <span class="mono pill-kbd" style="opacity:.7;">⌘K</span></button>
       <select id="roleSelect" class="role-select" onchange="setRole(this.value)"></select>
       <div class="notif-wrap">
         <button class="theme-toggle" id="notifBell" onclick="toggleNotifPanel()" title="Notifications">🔔<span class="notif-badge" id="notifBadge" style="display:none;"></span></button>
@@ -544,6 +573,18 @@ footer.site{background:var(--ink);color:#9AA6A0;padding:30px 0;font-size:12.5px;
 
 <div class="cmdk-overlay" id="invoiceOverlay" style="display:none;" onclick="if(event.target===this)closeInvoice()">
   <div class="invoice-modal" id="invoiceModalBody"></div>
+</div>
+
+<div class="cmdk-overlay" id="shortcutsOverlay" style="display:none;" onclick="if(event.target===this)closeShortcuts()">
+  <div class="cmdk-box" style="padding:22px 24px;">
+    <h3 style="font-family:var(--display);margin:0 0 14px;">Keyboard shortcuts</h3>
+    <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;">
+      <div style="display:flex;justify-content:space-between;"><span>Open search / command palette</span><span class="mono rule-chip">⌘ / Ctrl + K</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>Show this help</span><span class="mono rule-chip">?</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>Close any panel</span><span class="mono rule-chip">Esc</span></div>
+    </div>
+    <button class="btn btn-ghost" style="margin-top:18px;width:100%;justify-content:center;" onclick="closeShortcuts()">Close</button>
+  </div>
 </div>
 
 <script src="app.js"></script>

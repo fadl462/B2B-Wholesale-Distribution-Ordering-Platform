@@ -70,11 +70,16 @@ const CUSTOMER = {
   ]
 };
 
+const ORDER_STAGES = ['Ordered','Allocated','Picked & packed','In transit','Delivered'];
 const RECENT_ORDERS = [
-  { id:'ORD-88213', date:'24 Jul 2026', items:14, total:4820.50, status:'Delivered' },
-  { id:'ORD-88190', date:'19 Jul 2026', items:8,  total:2110.00, status:'In Transit' },
-  { id:'ORD-88155', date:'12 Jul 2026', items:22, total:7640.75, status:'Delivered' },
-  { id:'ORD-88102', date:'03 Jul 2026', items:5,  total:980.30,  status:'Backordered' },
+  { id:'ORD-88213', date:'24 Jul 2026', items:14, total:4820.50, status:'Delivered', stage:4,
+    lines:[{sku:'SKU-10231', qty:96}, {sku:'SKU-40012', qty:36}, {sku:'SKU-20114', qty:120}] },
+  { id:'ORD-88190', date:'19 Jul 2026', items:8,  total:2110.00, status:'In Transit', stage:3,
+    lines:[{sku:'SKU-10298', qty:48}, {sku:'SKU-40088', qty:60}] },
+  { id:'ORD-88155', date:'12 Jul 2026', items:22, total:7640.75, status:'Delivered', stage:4,
+    lines:[{sku:'SKU-30045', qty:20}, {sku:'SKU-30089', qty:48}, {sku:'SKU-10245', qty:72}] },
+  { id:'ORD-88102', date:'03 Jul 2026', items:5,  total:980.30,  status:'Backordered', stage:1,
+    lines:[{sku:'SKU-50021', qty:10}] },
 ];
 
 const INVOICES = [
@@ -86,12 +91,13 @@ const INVOICES = [
 const LOW_STOCK = PRODUCTS.filter(p => p.stock.available < 50);
 
 const WAREHOUSE_ZONES = [
-  { name:'Zone A · Beverages', bins:['full','full','low','full','full','empty'] },
-  { name:'Zone B · Snacks',    bins:['full','full','full','low','full','full'] },
-  { name:'Zone C · Medical',   bins:['low','empty','full','full','low','full'] },
-  { name:'Zone D · Cleaning',  bins:['full','full','full','full','full','low'] },
-  { name:'Zone E · Frozen',    bins:['empty','empty','full','low','full','full'] },
+  { name:'Zone A · Beverages', bins:[92,88,34,95,81,0] },
+  { name:'Zone B · Snacks',    bins:[90,85,93,28,77,89] },
+  { name:'Zone C · Medical',   bins:[31,0,96,90,22,84] },
+  { name:'Zone D · Cleaning',  bins:[88,91,86,94,79,25] },
+  { name:'Zone E · Frozen',    bins:[0,0,90,19,82,87] },
 ];
+function binStatus(count){ return count===0 ? 'empty' : count<40 ? 'low' : 'full'; }
 
 const PICK_QUEUE = {
   queued:[
@@ -99,7 +105,11 @@ const PICK_QUEUE = {
     {id:'ORD-88229', nm:'Nyame Foods Ltd', lines:14},
   ],
   picking:[
-    {id:'ORD-88224', nm:'Blessed Mart', lines:9},
+    {id:'ORD-88224', nm:'Blessed Mart', items:[
+      {sku:'SKU-10231', name:'Coca-Cola Can 350ml', qty:48, picked:false},
+      {sku:'SKU-20114', name:'Indomie Chicken Noodles 70g', qty:120, picked:false},
+      {sku:'SKU-40012', name:'Omo Detergent 1kg', qty:24, picked:true},
+    ]},
   ],
   packing:[
     {id:'ORD-88219', nm:'Osei & Sons', lines:4},
@@ -111,11 +121,11 @@ const PICK_QUEUE = {
 };
 
 const SALES_CUSTOMERS = [
-  { name:'Adjei Retail Stores', last:'2 days ago', balance:12480, risk:'Low' },
-  { name:'Nyame Foods Ltd', last:'Today', balance:31200, risk:'Medium' },
-  { name:'Blessed Mart', last:'5 days ago', balance:0, risk:'Low' },
-  { name:'Freetown Provisions', last:'1 day ago', balance:8600, risk:'Low' },
-  { name:'Osei & Sons', last:'11 days ago', balance:44100, risk:'High' },
+  { name:'Adjei Retail Stores', last:'2 days ago', balance:12480, risk:'Low', phone:'+233 24 555 0132', email:'kwame@adjeiretail.gh', visits:6, notes:'Prefers Tuesday deliveries. Interested in expanding to a second branch in Tema.' },
+  { name:'Nyame Foods Ltd', last:'Today', balance:31200, risk:'Medium', phone:'+233 20 441 8890', email:'ops@nyamefoods.gh', visits:9, notes:'Large volume buyer — negotiate carton-level pricing at next visit.' },
+  { name:'Blessed Mart', last:'5 days ago', balance:0, risk:'Low', phone:'+233 27 762 3345', email:'blessedmart@gmail.com', visits:14, notes:'Always pays on time. Good candidate for Gold tier upgrade.' },
+  { name:'Freetown Provisions', last:'1 day ago', balance:8600, risk:'Low', phone:'+233 54 220 7761', email:'info@freetownprov.gh', visits:4, notes:'New account — onboarded 6 weeks ago.' },
+  { name:'Osei & Sons', last:'11 days ago', balance:44100, risk:'High', phone:'+233 50 118 4423', email:'oseiandsons@yahoo.com', visits:2, notes:'Balance climbing — schedule an in-person collections visit this week.' },
 ];
 
 const DELIVERIES = [
@@ -146,6 +156,7 @@ const state = {
   view: 'marketing',
   pulseStarted:false,
   showRuleForm:false,
+  editingRuleIndex:null,
   role: 'admin',
   notifPanelOpen:false,
   ruleDraft:{ tier:'Gold', qtyOp:'>', qtyVal:100, region:'North', discount:12, freeShipping:true, priority:true },
@@ -156,6 +167,13 @@ const state = {
   ],
   notifications: NOTIF_SEED.map((n,i)=>({ id:'n'+i, ...n, read:false })),
   invoiceModal: null,
+  cycleCounts: [],
+  activeBin: null,
+  purchaseOrders: [],
+  lastPod: null,
+  syncQueued: 3,
+  lastSync: '4 minutes ago',
+  syncing: false,
   wizard: {
     step: 0, // index into WIZARD_STEPS
     business: { branch:'osu', location:'Oxford Street, Osu, Accra', rep:'Kojo Mensah' },
@@ -194,7 +212,7 @@ const WIZARD_STEPS = [
 ];
 
 function money(n){
-  return 'GH₵ ' + n.toLocaleString('en-GH', {minimumFractionDigits:2, maximumFractionDigits:2});
+  return '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 function esc(s){ return String(s); }
 
@@ -260,7 +278,29 @@ document.addEventListener('DOMContentLoaded', ()=>{
   loadPersisted();
   renderTabs();
   renderMain();
+  initHeaderScrollBehavior();
 });
+
+/* Header shrinks slightly once the page scrolls past a small threshold,
+   then stays in that compact state for the rest of the scroll (up or down)
+   until the user is back near the very top. */
+function initHeaderScrollBehavior(){
+  const topbar = document.querySelector('.topbar');
+  if(!topbar) return;
+  const THRESHOLD = 24;
+  let ticking = false;
+  function apply(){
+    topbar.classList.toggle('compact', window.scrollY > THRESHOLD);
+    ticking = false;
+  }
+  window.addEventListener('scroll', ()=>{
+    if(!ticking){
+      window.requestAnimationFrame(apply);
+      ticking = true;
+    }
+  }, { passive:true });
+  apply();
+}
 
 /* ---------------- Marketing / Overview ---------------- */
 
@@ -385,6 +425,7 @@ function setPulse(idx, pct, label){
 
 function viewCustomer(){
   const available = CUSTOMER.creditLimit - CUSTOMER.outstanding;
+  const cartCount = state.wizard.cart.length;
   return `
   <div class="dash-header">
     <div class="wrap flex-between">
@@ -392,41 +433,41 @@ function viewCustomer(){
         <div class="section-title">${CUSTOMER.name} <span style="color:var(--muted);font-weight:400;font-size:15px;">— ${CUSTOMER.branch}</span></div>
         <p class="section-sub" style="margin-bottom:0;">Tier <b style="color:var(--orange);">${CUSTOMER.tier}</b> · Sales rep ${CUSTOMER.salesRep} · Member since 2019</p>
       </div>
-      <button class="btn btn-primary" onclick="setView('wizard')">+ New guided order</button>
+      <button class="btn btn-primary" onclick="setView('wizard')">+ New guided order${cartCount?` (${cartCount} in progress)`:''}</button>
     </div>
   </div>
 
   <div class="dash-body wrap">
     <div class="grid kpi-row">
-      <div class="card">
+      <div class="card kpi-clickable" onclick="openCreditDetail()">
         <div class="card-title">Credit available</div>
         <div class="kpi-value">${money(available)}</div>
-        <div class="kpi-delta up">of ${money(CUSTOMER.creditLimit)} limit</div>
+        <div class="kpi-delta up">of ${money(CUSTOMER.creditLimit)} limit →</div>
       </div>
-      <div class="card">
+      <div class="card kpi-clickable" onclick="document.getElementById('invoicesCard').scrollIntoView({behavior:'smooth',block:'center'})">
         <div class="card-title">Outstanding balance</div>
         <div class="kpi-value">${money(CUSTOMER.outstanding)}</div>
-        <div class="kpi-delta down">2 invoices due</div>
+        <div class="kpi-delta down">${INVOICES.filter(i=>i.status!=='Paid').length} invoices due →</div>
       </div>
-      <div class="card">
+      <div class="card kpi-clickable" onclick="document.getElementById('recentOrdersCard').scrollIntoView({behavior:'smooth',block:'center'})">
         <div class="card-title">Orders this month</div>
         <div class="kpi-value">14</div>
-        <div class="kpi-delta up">+3 vs last month</div>
+        <div class="kpi-delta up">+3 vs last month →</div>
       </div>
-      <div class="card">
+      <div class="card kpi-clickable" onclick="setView('dispatch')">
         <div class="card-title">Pending deliveries</div>
         <div class="kpi-value">2</div>
-        <div class="kpi-delta">Next: today 2–4 PM</div>
+        <div class="kpi-delta">Next: today 2–4 PM →</div>
       </div>
     </div>
 
     <div class="grid two-col">
-      <div class="card">
+      <div class="card" id="recentOrdersCard">
         <div class="flex-between" style="margin-bottom:10px;">
           <div class="card-title" style="margin:0;">Recent orders</div>
           <div style="display:flex;gap:12px;align-items:center;">
             <button class="btn btn-ghost btn-sm" onclick="exportOrdersCSV()">⬇ Export CSV</button>
-            <a href="#" style="font-size:12.5px;color:var(--orange);font-weight:600;">View all</a>
+            <a href="#" onclick="toast('📋','Showing all 14 orders would open a paginated order history in production.');return false;" style="font-size:12.5px;color:var(--orange);font-weight:600;">View all</a>
           </div>
         </div>
         <table>
@@ -434,7 +475,7 @@ function viewCustomer(){
           <tbody>
             ${RECENT_ORDERS.map(o=>`
               <tr>
-                <td class="mono">${o.id}</td>
+                <td class="mono"><a href="#" onclick="openOrderDetail('${o.id}');return false;" style="color:var(--orange);font-weight:600;">${o.id}</a></td>
                 <td>${o.date}</td>
                 <td>${o.items}</td>
                 <td>${money(o.total)}</td>
@@ -451,22 +492,26 @@ function viewCustomer(){
           <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
             ${FREQUENT.map(id=>{
               const p = PRODUCTS.find(x=>x.id===id);
-              return `<div class="list-row"><span>${p.icon} ${p.name}</span><span class="mono" style="color:var(--muted);font-size:12px;">${p.id}</span></div>`;
+              const inCart = w().cart.some(c=>c.product.id===id);
+              return `<div class="list-row">
+                <span>${p.icon} ${p.name}</span>
+                <button class="btn ${inCart?'btn-ghost':'btn-dark'} btn-sm" style="padding:4px 10px;font-size:11.5px;" onclick="quickAddToCart('${id}',6)">${inCart?'✓ In order':'+ Quick add'}</button>
+              </div>`;
             }).join('')}
           </div>
-          <button class="btn btn-ghost btn-sm" style="margin-top:12px;width:100%;justify-content:center;" onclick="setView('wizard')">Reorder favourites</button>
+          <button class="btn btn-ghost btn-sm" style="margin-top:12px;width:100%;justify-content:center;" onclick="setView('wizard')">Open guided ordering</button>
         </div>
         <div class="card">
           <div class="card-title">Recommended for you</div>
-          <p style="font-size:12.5px;color:var(--muted);margin:6px 0 0;">Based on your order history and current promotions.</p>
-          <div class="list-row"><span>🧴 Dettol Antiseptic Soap</span><span class="badge amber">Bundle deal</span></div>
-          <div class="list-row"><span>🍺 Malta Guinness 330ml</span><span class="badge green">In stock</span></div>
+          <p style="font-size:12.5px;color:var(--muted);margin:6px 0 10px;">Based on your order history and current promotions.</p>
+          ${renderRecommendation('SKU-40088','Bundle deal')}
+          ${renderRecommendation('SKU-10298','In stock')}
         </div>
       </div>
     </div>
 
     <div class="grid two-col" style="margin-top:16px;">
-      <div class="card">
+      <div class="card" id="invoicesCard">
         <div class="card-title">Invoices</div>
         <table>
           <thead><tr><th>Invoice</th><th>Order</th><th>Due</th><th>Amount</th><th>Status</th><th></th></tr></thead>
@@ -486,13 +531,57 @@ function viewCustomer(){
       </div>
       <div class="card">
         <div class="card-title">Alerts</div>
-        <div class="list-row"><span>⚠️ INV-5498 is overdue by 2 days</span></div>
-        <div class="list-row"><span>📦 ORD-88190 is in transit — arriving today</span></div>
-        <div class="list-row"><span>🔔 New negotiated rate card applied to Beverages</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick='openInvoiceFromRecord(${JSON.stringify(INVOICES.find(i=>i.id==="INV-5498"))});'><span>⚠️ INV-5498 is overdue by 2 days →</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="setView('dispatch')"><span>📦 ORD-88190 is in transit — arriving today →</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="setView('admin');setTimeout(()=>document.getElementById('ruleBuilderSection')?.scrollIntoView({behavior:'smooth'}),150);"><span>🔔 New negotiated rate card applied to Beverages →</span></div>
       </div>
     </div>
   </div>
   `;
+}
+function renderRecommendation(sku, tag){
+  const p = PRODUCTS.find(x=>x.id===sku);
+  const inCart = w().cart.some(c=>c.product.id===sku);
+  return `<div class="list-row">
+    <span>${p.icon} ${p.name}</span>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span class="badge ${tag==='Bundle deal'?'amber':'green'}">${tag}</span>
+      <button class="btn ${inCart?'btn-ghost':'btn-dark'} btn-sm" style="padding:4px 10px;font-size:11.5px;" onclick="quickAddToCart('${sku}',6)">${inCart?'✓':'+'}</button>
+    </div>
+  </div>`;
+}
+function openCreditDetail(){
+  const available = CUSTOMER.creditLimit - CUSTOMER.outstanding;
+  const pct = Math.round((CUSTOMER.outstanding/CUSTOMER.creditLimit)*100);
+  const body = document.getElementById('invoiceModalBody');
+  body.innerHTML = `
+    <div style="padding:28px 30px;">
+      <h3 style="font-family:var(--display);margin:0 0 4px;">Credit position</h3>
+      <p style="color:#666;font-size:12.5px;margin:0 0 20px;">${CUSTOMER.name} — ${CUSTOMER.tier} tier</p>
+      <div style="background:#F2F1EA;border-radius:8px;height:10px;overflow:hidden;margin-bottom:8px;">
+        <div style="background:${pct>80?'#C6432F':pct>60?'#E8A93A':'#0F7C68'};height:100%;width:${Math.min(100,pct)}%;"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:11.5px;color:#777;margin-bottom:22px;">
+        <span>${pct}% utilised</span><span>${money(CUSTOMER.creditLimit)} limit</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;">
+        <div style="display:flex;justify-content:space-between;"><span>Credit limit</span><b>${money(CUSTOMER.creditLimit)}</b></div>
+        <div style="display:flex;justify-content:space-between;"><span>Outstanding balance</span><b>${money(CUSTOMER.outstanding)}</b></div>
+        <div style="display:flex;justify-content:space-between;border-top:1px solid #DDD;padding-top:10px;"><span>Available to spend</span><b style="color:#0F7C68;">${money(available)}</b></div>
+      </div>
+      <p style="font-size:12px;color:#777;margin-top:20px;">Orders that would push your balance past the limit are placed on hold until ${CUSTOMER.salesRep} approves an override.</p>
+    </div>
+    <div class="invoice-actions">
+      <button class="btn btn-ghost" onclick="closeInvoice()">Close</button>
+      <button class="btn btn-primary" onclick="requestCreditIncrease()">Request credit increase</button>
+    </div>
+  `;
+  document.getElementById('invoiceOverlay').style.display = 'flex';
+}
+function requestCreditIncrease(){
+  closeInvoice();
+  addNotification('💳', `Credit increase request sent to ${CUSTOMER.salesRep} for review`);
+  toast('💳', `Credit increase request sent to ${CUSTOMER.salesRep}`);
 }
 
 function statusBadge(status){
@@ -781,18 +870,36 @@ function setQty(v){ w().qty = Math.max(1, parseInt(v)||1); w().validationChoice=
 function changeQty(d){ w().qty = Math.max(1, w().qty + d); w().validationChoice=null; renderMain(); afterWizard(); }
 function chooseValidation(opt){ w().validationChoice = opt; renderMain(); afterWizard(); }
 
+function addLineToCart(product, uom, qty, validationChoice){
+  const price = computeLine(product, uom, qty);
+  state.wizard.cart.push({
+    product, uom, qty, pieces:price.pieces,
+    lineSubtotal:price.lineSubtotal, discountAmt:price.discountAmt, afterDiscount:price.afterDiscount,
+    validationChoice: validationChoice || null
+  });
+}
 function addToCart(){
   const p = w().product;
-  const price = computeLine(p, w().uom, w().qty);
-  w().cart.push({
-    product:p, uom:w().uom, qty:w().qty, pieces:price.pieces,
-    lineSubtotal:price.lineSubtotal, discountAmt:price.discountAmt, afterDiscount:price.afterDiscount,
-    validationChoice:w().validationChoice
-  });
+  addLineToCart(p, w().uom, w().qty, w().validationChoice);
   w().product = null; w().validationChoice = null;
   goStep('category');
 }
 function removeCartItem(idx){ w().cart.splice(idx,1); renderMain(); afterWizard(); }
+
+/* Quick-add from Customer Portal favourites / recommendations — skips the wizard for known items */
+function quickAddToCart(productId, qty){
+  const p = PRODUCTS.find(x=>x.id===productId);
+  if(!p) return;
+  const already = w().cart.find(c=>c.product.id===productId && c.uom==='piece');
+  if(already){
+    toast('ℹ️', `${p.name} is already in your order — opening guided order to adjust it.`);
+    setView('wizard'); goStep('review');
+    return;
+  }
+  addLineToCart(p, 'piece', qty || 6, null);
+  toast('🛒', `Added ${qty||6} × ${p.name} to your order`);
+  renderMain();
+}
 
 /* Step: Review */
 function stepReview(){
@@ -995,46 +1102,154 @@ function viewWarehouse(){
           <span><span style="display:inline-block;width:8px;height:8px;background:var(--red-light);border:1px solid var(--red);border-radius:2px;"></span> Empty</span>
         </div>
       </div>
+      <p style="font-size:11.5px;color:var(--muted);margin:-4px 0 10px;">Click any bin to record a cycle count.</p>
       <div class="wh-map">
-        ${WAREHOUSE_ZONES.map(z=>`
+        ${WAREHOUSE_ZONES.map((z,zi)=>`
           <div class="wh-zone">
             <div class="zn">${z.name}</div>
-            <div class="bins">${z.bins.map(b=>`<div class="bin ${b}"></div>`).join('')}</div>
+            <div class="bins">${z.bins.map((count,bi)=>`<div class="bin ${binStatus(count)}" title="Bin ${bi+1}: ${count} units" onclick="openBinCount(${zi},${bi})"></div>`).join('')}</div>
           </div>
         `).join('')}
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" style="margin-bottom:16px;">
       <div class="card-title" style="margin-bottom:12px;">Order fulfilment pipeline</div>
       <div class="kanban">
         ${kanbanCol('Queued', PICK_QUEUE.queued)}
-        ${kanbanCol('Picking', PICK_QUEUE.picking)}
+        ${kanbanColPicking()}
         ${kanbanCol('Packing', PICK_QUEUE.packing)}
         ${kanbanCol('Dispatch', PICK_QUEUE.dispatch)}
       </div>
     </div>
 
-    <div class="grid two-col" style="margin-top:16px;">
+    <div class="grid two-col">
       <div class="card">
         <div class="card-title">Low stock alerts</div>
         ${LOW_STOCK.map(p=>`
-          <div class="list-row"><span>${p.icon} ${p.name}</span><span class="badge ${p.stock.available===0?'red':'amber'}">${p.stock.available} pcs left</span></div>
+          <div class="list-row" style="cursor:pointer;" onclick="createPurchaseOrder('${p.id}')">
+            <span>${p.icon} ${p.name} →</span><span class="badge ${p.stock.available===0?'red':'amber'}">${p.stock.available} pcs left</span>
+          </div>
         `).join('')}
+        ${state.purchaseOrders.length ? `<p style="font-size:11px;color:var(--muted);margin-top:10px;">${state.purchaseOrders.length} purchase order(s) raised this session.</p>` : `<p style="font-size:11.5px;color:var(--muted);margin-top:10px;">Click a product to raise a replenishment purchase order.</p>`}
       </div>
       <div class="card">
         <div class="card-title">Returns &amp; damage workflow</div>
-        <div class="list-row"><span>RMA-2214 — 3 units, water damage</span><span class="badge amber">Credit note pending</span></div>
-        <div class="list-row"><span>RMA-2209 — 1 unit, wrong SKU picked</span><span class="badge green">Resolved</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="openRmaDetail('RMA-2214','3 units, water damage','pending')"><span>RMA-2214 — 3 units, water damage →</span><span class="badge amber">Credit note pending</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="openRmaDetail('RMA-2209','1 unit, wrong SKU picked','resolved')"><span>RMA-2209 — 1 unit, wrong SKU picked →</span><span class="badge green">Resolved</span></div>
       </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title">Recent cycle counts</div>
+      ${state.cycleCounts.length===0
+        ? `<p style="font-size:12.5px;color:var(--muted);">No cycle counts recorded yet — click a bin above to log one.</p>`
+        : state.cycleCounts.slice(0,6).map(c=>`
+            <div class="list-row">
+              <span>${c.zone} · Bin ${c.bin}</span>
+              <span>System ${c.system} → Physical ${c.physical}
+                ${c.variance!==0 ? `<span class="badge ${Math.abs(c.variance)>10?'red':'amber'}" style="margin-left:6px;">${c.variance>0?'+':''}${c.variance} variance</span>` : `<span class="badge green" style="margin-left:6px;">Matched</span>`}
+              </span>
+            </div>
+          `).join('')
+      }
     </div>
   </div>
   `;
 }
 function kanbanCol(title, items){
   return `<div class="kcol"><h5><span>${title}</span><span>${items.length}</span></h5>
-    ${items.map(o=>`<div class="kcard"><div class="id">${o.id}</div><div class="nm">${o.nm}</div><div style="color:var(--muted);">${o.lines} lines</div></div>`).join('')}
+    ${items.map(o=>`<div class="kcard" onclick="openOrderDetail('${o.id}')" style="cursor:pointer;"><div class="id">${o.id}</div><div class="nm">${o.nm}</div><div style="color:var(--muted);">${o.lines} lines</div></div>`).join('')}
   </div>`;
+}
+function kanbanColPicking(){
+  const items = PICK_QUEUE.picking;
+  return `<div class="kcol"><h5><span>Picking</span><span>${items.length}</span></h5>
+    ${items.map(o=>{
+      const pickedCount = o.items.filter(i=>i.picked).length;
+      return `
+      <div class="kcard" style="margin-bottom:10px;">
+        <div class="flex-between">
+          <div><div class="id">${o.id}</div><div class="nm">${o.nm}</div></div>
+          <span style="font-size:11px;color:var(--muted);">${pickedCount}/${o.items.length} picked</span>
+        </div>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
+          ${o.items.map(it=>`
+            <div style="display:flex;justify-content:space-between;font-size:11.5px;color:${it.picked?'var(--teal)':'var(--text)'};">
+              <span>${it.picked?'✓':'○'} ${it.name}</span><span class="mono">${it.qty}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+    }).join('')}
+    <div style="margin-top:6px;">
+      <input type="text" id="scanInput" placeholder="Scan or type SKU…" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:12px;font-family:var(--mono);"
+        onkeydown="if(event.key==='Enter'){scanPick(this.value); this.value='';}">
+    </div>
+  </div>`;
+}
+function scanPick(sku){
+  sku = (sku||'').trim().toUpperCase();
+  if(!sku) return;
+  for(const order of PICK_QUEUE.picking){
+    const item = order.items.find(i => i.sku.toUpperCase() === sku && !i.picked);
+    if(item){
+      item.picked = true;
+      toast('✅', `Picked: ${item.name} (${item.qty} pcs) — ${order.id}`);
+      const allPicked = order.items.every(i=>i.picked);
+      if(allPicked){
+        PICK_QUEUE.picking = PICK_QUEUE.picking.filter(o=>o.id!==order.id);
+        PICK_QUEUE.packing.push({ id:order.id, nm:order.nm, lines:order.items.length });
+        addNotification('📦', `${order.id} fully picked — moved to Packing`);
+        toast('📦', `${order.id} fully picked — moved to Packing`);
+      }
+      renderMain();
+      return;
+    }
+  }
+  toast('⚠️', `SKU "${sku}" not found in any active pick list`);
+}
+
+/* Cycle count drill-down */
+function openBinCount(zoneIdx, binIdx){
+  state.activeBin = { zoneIdx, binIdx };
+  const zone = WAREHOUSE_ZONES[zoneIdx];
+  const system = zone.bins[binIdx];
+  const body = document.getElementById('invoiceModalBody'); // reuse the generic light modal
+  body.innerHTML = `
+    <div style="padding:28px 30px;">
+      <h3 style="font-family:var(--display);margin:0 0 4px;">Cycle count — ${zone.name}</h3>
+      <p style="color:#666;font-size:13px;margin:0 0 20px;">Bin ${binIdx+1} of ${zone.bins.length}</p>
+      <div style="display:flex;gap:20px;margin-bottom:18px;">
+        <div style="flex:1;">
+          <label style="font-size:11.5px;font-weight:600;color:#666;display:block;margin-bottom:6px;">System count</label>
+          <div style="font-family:var(--mono);font-size:22px;font-weight:600;">${system} units</div>
+        </div>
+        <div style="flex:1;">
+          <label style="font-size:11.5px;font-weight:600;color:#666;display:block;margin-bottom:6px;">Physical count</label>
+          <input type="number" id="physicalCountInput" value="${system}" style="width:100%;padding:10px 12px;border:1px solid #DDD;border-radius:7px;font-size:16px;font-family:var(--mono);">
+        </div>
+      </div>
+      <p style="font-size:12px;color:#777;">Enter what you physically counted on the shelf. Variances beyond ±10 units are flagged for review.</p>
+    </div>
+    <div class="invoice-actions">
+      <button class="btn btn-ghost" onclick="closeInvoice()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBinCount()">Save count</button>
+    </div>
+  `;
+  document.getElementById('invoiceOverlay').style.display = 'flex';
+}
+function saveBinCount(){
+  const { zoneIdx, binIdx } = state.activeBin;
+  const zone = WAREHOUSE_ZONES[zoneIdx];
+  const system = zone.bins[binIdx];
+  const physical = Math.max(0, parseInt(document.getElementById('physicalCountInput').value) || 0);
+  const variance = physical - system;
+  zone.bins[binIdx] = physical;
+  state.cycleCounts.unshift({ zone: zone.name, bin: binIdx+1, system, physical, variance, time:'just now' });
+  closeInvoice();
+  toast(variance===0 ? '✅' : '⚠️', variance===0 ? 'Cycle count matched — no variance' : `Cycle count logged — variance of ${variance>0?'+':''}${variance} units flagged`);
+  renderMain();
 }
 
 /* ---------------- Sales Rep Portal ---------------- */
@@ -1049,22 +1264,19 @@ function viewSales(){
   </div>
   <div class="dash-body wrap">
     <div class="grid kpi-row">
-      <div class="card"><div class="card-title">Monthly target</div><div class="kpi-value">GH₵ 180k</div><div class="kpi-delta up">72% achieved</div></div>
-      <div class="card"><div class="card-title">Orders this month</div><div class="kpi-value">61</div></div>
-      <div class="card"><div class="card-title">Commission accrued</div><div class="kpi-value">GH₵ 6,340</div></div>
-      <div class="card"><div class="card-title">Collections pending</div><div class="kpi-value">GH₵ 96,380</div><div class="kpi-delta down">5 accounts overdue</div></div>
+      <div class="card kpi-clickable" onclick="toast('🎯','72% of $180k target achieved — $50,400 remaining this month')"><div class="card-title">Monthly target</div><div class="kpi-value">$180k</div><div class="kpi-delta up">72% achieved →</div></div>
+      <div class="card kpi-clickable" onclick="document.getElementById('salesCustTable').scrollIntoView({behavior:'smooth',block:'center'})"><div class="card-title">Orders this month</div><div class="kpi-value">61</div></div>
+      <div class="card kpi-clickable" onclick="toast('💰','$6,340 commission accrued — paid out on the 1st of next month')"><div class="card-title">Commission accrued</div><div class="kpi-value">$6,340</div></div>
+      <div class="card kpi-clickable" onclick="filterSalesByRisk('High')"><div class="card-title">Collections pending</div><div class="kpi-value">$96,380</div><div class="kpi-delta down">5 accounts overdue →</div></div>
     </div>
 
     <div class="grid two-col">
-      <div class="card">
+      <div class="card" id="salesCustTable">
         <div class="card-title">Assigned customers</div>
         <table>
           <thead><tr><th>Customer</th><th>Last order</th><th>Balance</th><th>Risk</th></tr></thead>
-          <tbody>
-            ${SALES_CUSTOMERS.map(c=>`
-              <tr><td>${c.name}</td><td>${c.last}</td><td>${money(c.balance)}</td>
-              <td><span class="badge ${c.risk==='High'?'red':c.risk==='Medium'?'amber':'green'}">${c.risk}</span></td></tr>
-            `).join('')}
+          <tbody id="salesCustBody">
+            ${renderSalesRows(SALES_CUSTOMERS)}
           </tbody>
         </table>
       </div>
@@ -1075,6 +1287,54 @@ function viewSales(){
     </div>
   </div>
   `;
+}
+function renderSalesRows(list){
+  return list.map((c,idx)=>`
+    <tr style="cursor:pointer;" onclick='openCustomerDetail(${JSON.stringify(c)})'>
+      <td>${c.name}</td><td>${c.last}</td><td>${money(c.balance)}</td>
+      <td><span class="badge ${c.risk==='High'?'red':c.risk==='Medium'?'amber':'green'}">${c.risk}</span></td>
+    </tr>
+  `).join('');
+}
+function filterSalesByRisk(risk){
+  const filtered = SALES_CUSTOMERS.filter(c=>c.risk===risk || c.balance>0);
+  document.getElementById('salesCustBody').innerHTML = renderSalesRows(filtered.length?filtered:SALES_CUSTOMERS);
+  document.getElementById('salesCustTable').scrollIntoView({behavior:'smooth',block:'center'});
+  toast('🔎', `Showing ${filtered.length} account(s) with an outstanding balance`);
+}
+function openCustomerDetail(c){
+  const body = document.getElementById('invoiceModalBody');
+  body.innerHTML = `
+    <div style="padding:28px 30px;">
+      <div class="flex-between" style="margin-bottom:4px;">
+        <h3 style="font-family:var(--display);margin:0;">${c.name}</h3>
+        <span class="badge ${c.risk==='High'?'red':c.risk==='Medium'?'amber':'green'}">${c.risk} risk</span>
+      </div>
+      <p style="color:#666;font-size:12.5px;margin:0 0 20px;">Last order ${c.last} · ${c.visits} visits logged</p>
+      <div style="display:flex;flex-direction:column;gap:9px;font-size:13px;margin-bottom:18px;">
+        <div style="display:flex;justify-content:space-between;"><span>📞 Phone</span><span>${c.phone}</span></div>
+        <div style="display:flex;justify-content:space-between;"><span>✉️ Email</span><span>${c.email}</span></div>
+        <div style="display:flex;justify-content:space-between;"><span>💰 Outstanding balance</span><b>${money(c.balance)}</b></div>
+      </div>
+      <div style="background:#F2F1EA;border-radius:8px;padding:12px 14px;font-size:12.5px;color:#444;">${c.notes}</div>
+    </div>
+    <div class="invoice-actions">
+      <button class="btn btn-ghost" onclick="closeInvoice()">Close</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="toast('📞','Dialling ${c.phone.replace(/'/g,"")}…')">Call</button>
+        <button class="btn btn-primary" onclick="logVisit('${c.name.replace(/'/g,"")}')">Log a visit</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('invoiceOverlay').style.display = 'flex';
+}
+function logVisit(name){
+  const c = SALES_CUSTOMERS.find(x=>x.name===name);
+  if(c){ c.visits += 1; c.last = 'Just now'; }
+  closeInvoice();
+  addNotification('🧭', `Visit logged for ${name}`);
+  toast('🧭', `Visit logged for ${name} — ${c?c.visits:''} total visits`);
+  renderMain();
 }
 function afterSales(){
   const ctx = document.getElementById('targetChart');
@@ -1093,13 +1353,13 @@ function viewFinance(){
   <div class="dash-header">
     <div class="wrap">
       <div class="section-title">Finance Portal</div>
-      <p class="section-sub" style="margin-bottom:0;">GST-compliant invoicing · two-way Tally sync · last reconciled 4 minutes ago</p>
+      <p class="section-sub" style="margin-bottom:0;">GST-compliant invoicing · two-way Tally sync · last reconciled ${state.lastSync}</p>
     </div>
   </div>
   <div class="dash-body wrap">
     <div class="grid kpi-row">
-      <div class="card"><div class="card-title">Receivables outstanding</div><div class="kpi-value">GH₵ 412k</div></div>
-      <div class="card"><div class="card-title">Overdue &gt; 30 days</div><div class="kpi-value">GH₵ 68k</div><div class="kpi-delta down">14 accounts</div></div>
+      <div class="card"><div class="card-title">Receivables outstanding</div><div class="kpi-value">$412k</div></div>
+      <div class="card"><div class="card-title">Overdue &gt; 30 days</div><div class="kpi-value">$68k</div><div class="kpi-delta down">14 accounts</div></div>
       <div class="card"><div class="card-title">Invoices issued (mo)</div><div class="kpi-value">1,204</div></div>
       <div class="card"><div class="card-title">Tally sync status</div><div class="kpi-value" style="font-size:20px;color:var(--teal);">✓ Connected</div></div>
     </div>
@@ -1110,12 +1370,15 @@ function viewFinance(){
         <div class="chart-box"><canvas id="agingChart"></canvas></div>
       </div>
       <div class="card">
-        <div class="card-title">Sync queue</div>
+        <div class="flex-between" style="margin-bottom:2px;">
+          <div class="card-title" style="margin:0;">Sync queue</div>
+          <button class="btn btn-ghost btn-sm" onclick="forceReconcile()">${state.syncing?'Reconciling…':'Force reconciliation now'}</button>
+        </div>
         <div class="list-row"><span>Invoices → Tally</span><span class="badge green">Synced</span></div>
         <div class="list-row"><span>Credit notes → Tally</span><span class="badge green">Synced</span></div>
-        <div class="list-row"><span>Payments ← Tally</span><span class="badge amber">3 queued</span></div>
+        <div class="list-row"><span>Payments ← Tally</span><span class="badge ${state.syncQueued>0?'amber':'green'}">${state.syncQueued>0?state.syncQueued+' queued':'Synced'}</span></div>
         <div class="list-row"><span>Customer master ↔ Tally</span><span class="badge green">Synced</span></div>
-        <p style="font-size:11.5px;color:var(--muted);margin-top:10px;">If Tally goes offline, changes queue locally, version, and reconcile automatically on reconnect — nothing is lost or double-posted.</p>
+        <p style="font-size:11.5px;color:var(--muted);margin-top:10px;">Last reconciled ${state.lastSync}. If Tally goes offline, changes queue locally, version, and reconcile automatically on reconnect — nothing is lost or double-posted.</p>
       </div>
     </div>
 
@@ -1163,7 +1426,7 @@ function viewAdmin(){
   </div>
   <div class="dash-body wrap">
     <div class="grid kpi-row">
-      <div class="card"><div class="card-title">Revenue (mo-to-date)</div><div class="kpi-value">GH₵ 2.41M</div><div class="kpi-delta up">+11.4% vs last mo</div></div>
+      <div class="card"><div class="card-title">Revenue (mo-to-date)</div><div class="kpi-value">$2.41M</div><div class="kpi-delta up">+11.4% vs last mo</div></div>
       <div class="card"><div class="card-title">Fulfilment rate</div><div class="kpi-value">96.8%</div><div class="kpi-delta up">+1.2 pts</div></div>
       <div class="card"><div class="card-title">Warehouse utilisation</div><div class="kpi-value">78%</div></div>
       <div class="card"><div class="card-title">Active backorders</div><div class="kpi-value">37</div><div class="kpi-delta down">-9 vs last week</div></div>
@@ -1184,25 +1447,25 @@ function viewAdmin(){
     <div class="grid three-col" style="margin-top:16px;">
       <div class="card">
         <div class="card-title">Regional performance</div>
-        <div class="list-row"><span>Greater Accra</span><span><b>GH₵ 1.12M</b></span></div>
-        <div class="list-row"><span>Ashanti</span><span><b>GH₵ 640k</b></span></div>
-        <div class="list-row"><span>Western</span><span><b>GH₵ 310k</b></span></div>
-        <div class="list-row"><span>Volta</span><span><b>GH₵ 210k</b></span></div>
-        <div class="list-row"><span>Northern</span><span><b>GH₵ 148k</b></span></div>
+        ${renderRegionRow('Greater Accra','$1.12M',['Adjei Retail Stores — $210k','Nyame Foods Ltd — $184k','Blessed Mart — $96k'],'+14% vs last quarter')}
+        ${renderRegionRow('Ashanti','$640k',['Osei & Sons — $88k','Freetown Provisions — $52k'],'+6% vs last quarter')}
+        ${renderRegionRow('Western','$310k',['3 active accounts'],'Flat vs last quarter')}
+        ${renderRegionRow('Volta','$210k',['2 active accounts'],'−3% vs last quarter')}
+        ${renderRegionRow('Northern','$148k',['2 active accounts'],'+9% vs last quarter')}
       </div>
       <div class="card">
         <div class="card-title">Demand forecast — next 7 days</div>
-        <div class="list-row"><span>🥤 Beverages</span><span class="badge green">↑ 12%</span></div>
-        <div class="list-row"><span>🍜 Snacks</span><span class="badge grey">Stable</span></div>
-        <div class="list-row"><span>💊 Medical</span><span class="badge amber">↑ 22% (flu season)</span></div>
-        <div class="list-row"><span>🧊 Frozen</span><span class="badge red">↓ 8% (cold chain gap)</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="toast('🥤','Beverages up 12% — hot weather driving cold-drink demand across Accra')"><span>🥤 Beverages</span><span class="badge green">↑ 12%</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="toast('🍜','Snacks demand holding steady — no reorder action needed')"><span>🍜 Snacks</span><span class="badge grey">Stable</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="toast('💊','Medical up 22% — seasonal flu demand, consider a pre-emptive restock')"><span>💊 Medical</span><span class="badge amber">↑ 22% (flu season)</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="toast('🧊','Frozen down 8% — cold chain capacity gap at Tema warehouse')"><span>🧊 Frozen</span><span class="badge red">↓ 8% (cold chain gap)</span></div>
       </div>
       <div class="card">
         <div class="card-title">Integration health</div>
-        <div class="list-row"><span>Tally ERP</span><span class="badge green">Connected</span></div>
-        <div class="list-row"><span>SAP</span><span class="badge grey">Not configured</span></div>
-        <div class="list-row"><span>Payment gateway</span><span class="badge grey">N/A — offline terms</span></div>
-        <div class="list-row"><span>SMS / WhatsApp notify</span><span class="badge green">Connected</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="toast('✅','Tally ERP — last synced just now, 0 conflicts')"><span>Tally ERP</span><span class="badge green">Connected</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="requestIntegration('SAP')"><span>SAP</span><span class="badge grey">Not configured →</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="toast('ℹ️','This account operates on offline credit terms — no payment gateway needed')"><span>Payment gateway</span><span class="badge grey">N/A — offline terms</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="toast('✅','SMS / WhatsApp notifications — 1,204 sent this month, 99.1% delivered')"><span>SMS / WhatsApp notify</span><span class="badge green">Connected</span></div>
       </div>
     </div>
 
@@ -1229,7 +1492,7 @@ function afterAdmin(){
       type:'line',
       data:{ labels:['W1','W2','W3','W4','W5','W6','W7','W8'],
         datasets:[
-          { label:'Revenue (GH₵ k)', data:[210,232,198,255,268,241,289,301], borderColor:'#FF6A1A', backgroundColor:'rgba(255,106,26,.1)', tension:.35, fill:true, yAxisID:'y' },
+          { label:'Revenue ($k)', data:[210,232,198,255,268,241,289,301], borderColor:'#FF6A1A', backgroundColor:'rgba(255,106,26,.1)', tension:.35, fill:true, yAxisID:'y' },
           { label:'Orders', data:[540,580,510,610,640,590,670,690], borderColor:'#0F7C68', backgroundColor:'rgba(15,124,104,.08)', tension:.35, fill:true, yAxisID:'y1' },
         ]},
       options:{ interaction:{mode:'index',intersect:false}, plugins:{legend:{position:'bottom',labels:{font:{size:11}}}},
@@ -1249,17 +1512,18 @@ function afterAdmin(){
 /* ---------------- Dispatch & Driver ---------------- */
 
 function viewDispatch(){
+  const delivered = DELIVERIES.filter(d=>d.status==='Delivered').length;
   return `
   <div class="dash-header">
     <div class="wrap">
       <div class="section-title">Dispatch &amp; Driver Portal</div>
-      <p class="section-sub" style="margin-bottom:0;">Driver: Yaw Boateng · Vehicle GH-4471-24 · 3 stops today</p>
+      <p class="section-sub" style="margin-bottom:0;">Driver: Yaw Boateng · Vehicle GH-4471-24 · ${DELIVERIES.length} stops today</p>
     </div>
   </div>
   <div class="dash-body wrap">
     <div class="grid kpi-row" style="grid-template-columns:repeat(3,1fr);">
-      <div class="card"><div class="card-title">Stops today</div><div class="kpi-value">3</div></div>
-      <div class="card"><div class="card-title">Delivered</div><div class="kpi-value">1</div></div>
+      <div class="card"><div class="card-title">Stops today</div><div class="kpi-value">${DELIVERIES.length}</div></div>
+      <div class="card"><div class="card-title">Delivered</div><div class="kpi-value">${delivered}</div></div>
       <div class="card"><div class="card-title">On-time rate (mo)</div><div class="kpi-value">94%</div></div>
     </div>
 
@@ -1270,12 +1534,12 @@ function viewDispatch(){
         <tbody>
           ${DELIVERIES.map(d=>`
             <tr>
-              <td class="mono">${d.id}</td>
+              <td class="mono"><a href="#" onclick="openOrderDetail('${d.id}');return false;" style="color:var(--orange);font-weight:600;">${d.id}</a></td>
               <td>${d.nm}</td>
               <td>${d.addr}</td>
               <td>${d.win}</td>
               <td>${statusBadge(d.status==='Out for delivery'?'In Transit':d.status==='Delivered'?'Delivered':'Outstanding')}</td>
-              <td>${d.status!=='Delivered' ? `<button class="btn btn-ghost btn-sm" onclick="toast('✅','Proof of delivery captured — signature, photo &amp; OTP verified')">Capture POD</button>` : '<span style="color:var(--muted);font-size:12px;">✓ Signed &amp; photographed</span>'}</td>
+              <td>${dispatchAction(d)}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -1285,20 +1549,44 @@ function viewDispatch(){
     <div class="grid two-col" style="margin-top:16px;">
       <div class="card">
         <div class="card-title">Proof of delivery — last stop</div>
-        <div class="list-row"><span>Customer signature</span><span class="badge green">Captured</span></div>
-        <div class="list-row"><span>Delivery photo</span><span class="badge green">Captured</span></div>
-        <div class="list-row"><span>OTP verification</span><span class="badge green">Verified — 4821</span></div>
+        ${state.lastPod ? `
+          <div class="list-row"><span>Customer signature</span><span class="badge green">Captured</span></div>
+          <div class="list-row"><span>Delivery photo</span><span class="badge green">Captured</span></div>
+          <div class="list-row"><span>OTP verification</span><span class="badge green">Verified — ${state.lastPod.otp}</span></div>
+        ` : `<p style="font-size:12.5px;color:var(--muted);">No deliveries captured yet this session.</p>`}
       </div>
       <div class="card">
         <div class="card-title">Route optimisation</div>
         <p style="font-size:13px;color:var(--muted);margin:0 0 10px;">The routing engine selected this sequence to minimise total distance while respecting each customer's delivery window.</p>
-        <div class="list-row"><span>1. Blessed Mart — Dansoman</span><span class="badge green">Done</span></div>
-        <div class="list-row"><span>2. Adjei Retail — Osu</span><span class="badge amber">In progress</span></div>
-        <div class="list-row"><span>3. Freetown Provisions — Spintex</span><span class="badge grey">Queued</span></div>
+        ${DELIVERIES.map((d,i)=>`
+          <div class="list-row"><span>${i+1}. ${d.nm} — ${d.addr}</span>
+            <span class="badge ${d.status==='Delivered'?'green':d.status==='Out for delivery'?'amber':'grey'}">${d.status==='Delivered'?'Done':d.status==='Out for delivery'?'In progress':'Queued'}</span>
+          </div>
+        `).join('')}
       </div>
     </div>
   </div>
   `;
+}
+function dispatchAction(d){
+  if(d.status==='Delivered') return '<span style="color:var(--muted);font-size:12px;">✓ Signed &amp; photographed</span>';
+  if(d.status==='Queued') return `<button class="btn btn-ghost btn-sm" onclick="startDelivery('${d.id}')">Start delivery</button>`;
+  return `<button class="btn btn-ghost btn-sm" onclick="capturePOD('${d.id}')">Capture POD</button>`;
+}
+function startDelivery(id){
+  const d = DELIVERIES.find(x=>x.id===id);
+  if(d) d.status = 'Out for delivery';
+  toast('🚚', `${id} marked out for delivery`);
+  renderMain();
+}
+function capturePOD(id){
+  const d = DELIVERIES.find(x=>x.id===id);
+  const otp = Math.floor(1000+Math.random()*8999);
+  if(d) d.status = 'Delivered';
+  state.lastPod = { id, otp };
+  addNotification('✅', `${id} delivered — proof of delivery captured (OTP ${otp})`);
+  toast('✅', `Proof of delivery captured for ${id} — signature, photo &amp; OTP ${otp} verified`);
+  renderMain();
 }
 
 /* ---------------- Toasts ---------------- */
@@ -1336,6 +1624,7 @@ const CMDK_ITEMS = [
   { label:'Open pricing rule builder', kind:'Action', action:()=>{ setView('admin'); setTimeout(()=>document.getElementById('ruleBuilderSection')?.scrollIntoView({behavior:'smooth'}),150); } },
   { label:'Toggle dark mode', kind:'Action', action:()=>toggleTheme() },
   { label:'Check overdue invoices', kind:'Action', action:()=>setView('finance') },
+  ...Object.keys(ROLES).map(id => ({ label:`Switch role: ${ROLES[id].label}`, kind:'Role', action:()=>setRole(id) })),
 ];
 let cmdkHi = 0;
 function openCmdk(){
@@ -1346,6 +1635,7 @@ function openCmdk(){
   setTimeout(()=>document.getElementById('cmdkInput').focus(), 30);
 }
 function closeCmdk(){ document.getElementById('cmdkOverlay').style.display='none'; }
+function closeShortcuts(){ const el = document.getElementById('shortcutsOverlay'); if(el) el.style.display='none'; }
 function renderCmdkList(term){
   const list = CMDK_ITEMS.filter(i=>i.label.toLowerCase().includes(term.toLowerCase()));
   document.getElementById('cmdkList').innerHTML = list.map((i,idx)=>`
@@ -1361,12 +1651,21 @@ function runCmdk(idx, term){
   if(item) item.action();
 }
 document.addEventListener('keydown', (e)=>{
+  const typing = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName);
   if((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==='k'){
     e.preventDefault();
     const overlay = document.getElementById('cmdkOverlay');
     if(overlay.style.display==='flex') closeCmdk(); else openCmdk();
   }
-  if(e.key==='Escape') closeCmdk();
+  if(e.key==='?' && !typing){
+    e.preventDefault();
+    document.getElementById('shortcutsOverlay').style.display = 'flex';
+  }
+  if(e.key==='Escape'){
+    closeCmdk();
+    closeShortcuts();
+    closeInvoice();
+  }
   const overlay = document.getElementById('cmdkOverlay');
   if(overlay && overlay.style.display==='flex'){
     const list = window._cmdkFiltered || CMDK_ITEMS;
@@ -1448,12 +1747,19 @@ function renderRuleList(){
       </div>
       <div class="rule-actions">
         <span style="font-size:11px;color:var(--muted);">Rule #${idx+1} · active on all new orders</span>
-        <a href="#" onclick="deleteRule(${idx});return false;" style="font-size:12px;color:var(--red);">Delete</a>
+        <span><a href="#" onclick="editRule(${idx});return false;" style="font-size:12px;color:var(--orange);font-weight:600;margin-right:12px;">Edit</a><a href="#" onclick="deleteRule(${idx});return false;" style="font-size:12px;color:var(--red);">Delete</a></span>
       </div>
     </div>
   `).join('');
 }
-function toggleRuleForm(){ state.showRuleForm = !state.showRuleForm; renderMain(); afterAdmin(); }
+function toggleRuleForm(){
+  state.showRuleForm = !state.showRuleForm;
+  if(state.showRuleForm && state.editingRuleIndex===null){
+    state.ruleDraft = { tier:'Gold', qtyOp:'>', qtyVal:100, region:'North', discount:12, freeShipping:true, priority:true };
+  }
+  if(!state.showRuleForm) state.editingRuleIndex = null;
+  renderMain(); afterAdmin();
+}
 function renderRuleForm(){
   const d = state.ruleDraft;
   return `
@@ -1495,10 +1801,23 @@ function updateRuleDraft(field, val){
   // intentionally no re-render here so number/text inputs keep focus while typing
 }
 function saveRule(){
-  state.rules.push({...state.ruleDraft});
+  if(state.editingRuleIndex!==null && state.editingRuleIndex!==undefined){
+    state.rules[state.editingRuleIndex] = {...state.ruleDraft};
+    toast('⚙️','Rule updated');
+    state.editingRuleIndex = null;
+  } else {
+    state.rules.push({...state.ruleDraft});
+    toast('⚙️','New pricing rule saved and applied to future orders');
+  }
   state.showRuleForm = false;
-  toast('⚙️','New pricing rule saved and applied to future orders');
   renderMain(); afterAdmin();
+}
+function editRule(idx){
+  state.ruleDraft = {...state.rules[idx]};
+  state.editingRuleIndex = idx;
+  state.showRuleForm = true;
+  renderMain(); afterAdmin();
+  document.getElementById('ruleBuilderSection')?.scrollIntoView({behavior:'smooth'});
 }
 function deleteRule(idx){
   state.rules.splice(idx,1);
@@ -1513,6 +1832,9 @@ function persist(){
     localStorage.setItem(PERSIST_KEY, JSON.stringify({
       theme, role: state.role, rules: state.rules,
       notifications: state.notifications, wizard: state.wizard,
+      cycleCounts: state.cycleCounts, syncQueued: state.syncQueued, lastSync: state.lastSync,
+      purchaseOrders: state.purchaseOrders, lastPod: state.lastPod, deliveries: DELIVERIES,
+      pickQueue: PICK_QUEUE, warehouseBins: WAREHOUSE_ZONES.map(z=>z.bins),
     }));
   }catch(e){ /* storage unavailable — fail silently, app still works in-memory */ }
 }
@@ -1528,6 +1850,23 @@ function loadPersisted(){
     if(saved.role && ROLES[saved.role]) state.role = saved.role;
     if(Array.isArray(saved.rules) && saved.rules.length) state.rules = saved.rules;
     if(Array.isArray(saved.notifications) && saved.notifications.length) state.notifications = saved.notifications;
+    if(Array.isArray(saved.cycleCounts)) state.cycleCounts = saved.cycleCounts;
+    if(Array.isArray(saved.purchaseOrders)) state.purchaseOrders = saved.purchaseOrders;
+    if(saved.lastPod) state.lastPod = saved.lastPod;
+    if(Array.isArray(saved.deliveries)){
+      saved.deliveries.forEach((d,i)=>{ if(DELIVERIES[i]) DELIVERIES[i].status = d.status; });
+    }
+    if(typeof saved.syncQueued === 'number') state.syncQueued = saved.syncQueued;
+    if(saved.lastSync) state.lastSync = saved.lastSync;
+    if(saved.pickQueue){
+      if(Array.isArray(saved.pickQueue.queued)) PICK_QUEUE.queued = saved.pickQueue.queued;
+      if(Array.isArray(saved.pickQueue.picking)) PICK_QUEUE.picking = saved.pickQueue.picking;
+      if(Array.isArray(saved.pickQueue.packing)) PICK_QUEUE.packing = saved.pickQueue.packing;
+      if(Array.isArray(saved.pickQueue.dispatch)) PICK_QUEUE.dispatch = saved.pickQueue.dispatch;
+    }
+    if(Array.isArray(saved.warehouseBins)){
+      saved.warehouseBins.forEach((bins,i)=>{ if(WAREHOUSE_ZONES[i] && Array.isArray(bins)) WAREHOUSE_ZONES[i].bins = bins; });
+    }
     if(saved.wizard){
       state.wizard = Object.assign({}, state.wizard, saved.wizard);
       if(Array.isArray(state.wizard.cart)){
@@ -1679,14 +2018,182 @@ function downloadCSV(filename, rows){
   URL.revokeObjectURL(url);
 }
 function exportInvoicesCSV(){
-  const rows = [['Invoice','Customer','Order','Due date','Amount (GHS)','Status']];
+  const rows = [['Invoice','Customer','Order','Due date','Amount (USD)','Status']];
   FINANCE_INVOICES.forEach(i => rows.push([i.id, i.customer, i.order, i.due, i.amount.toFixed(2), i.status]));
   downloadCSV('karavan-invoices.csv', rows);
   toast('⬇️','Invoices exported as CSV');
 }
 function exportOrdersCSV(){
-  const rows = [['Order','Date','Items','Total (GHS)','Status']];
+  const rows = [['Order','Date','Items','Total (USD)','Status']];
   RECENT_ORDERS.forEach(o => rows.push([o.id, o.date, o.items, o.total.toFixed(2), o.status]));
   downloadCSV('karavan-orders.csv', rows);
   toast('⬇️','Orders exported as CSV');
+}
+
+/* ---------------- Order detail drill-down ---------------- */
+const STAGE_LABELS = ['Ordered','Allocated','Picked & packed','In transit','Delivered'];
+
+function findOrderRecord(orderId){
+  const found = RECENT_ORDERS.find(o=>o.id===orderId);
+  if(found) return found;
+  // synthesize a plausible record for IDs that only exist in warehouse/dispatch mock data
+  let stage = 1;
+  const inPacking = PICK_QUEUE.packing.find(o=>o.id===orderId);
+  const inDispatch = PICK_QUEUE.dispatch.find(o=>o.id===orderId) || DELIVERIES.find(d=>d.id===orderId);
+  const inQueued = PICK_QUEUE.queued.find(o=>o.id===orderId);
+  const inPicking = PICK_QUEUE.picking.find(o=>o.id===orderId);
+  if(inQueued) stage = 0;
+  if(inPicking) stage = 1;
+  if(inPacking) stage = 2;
+  if(inDispatch) stage = (inDispatch.status==='Delivered') ? 4 : 3;
+  const nm = (inPacking||inDispatch||inQueued||inPicking||{}).nm || 'Customer';
+  // deterministic pseudo-random line items based on order id
+  let seed = 0; for(const ch of orderId) seed += ch.charCodeAt(0);
+  const lines = [0,1,2].map(i => {
+    const p = PRODUCTS[(seed + i*3) % PRODUCTS.length];
+    const qty = 12 + ((seed*(i+1)) % 60);
+    return { sku:p.id, qty };
+  });
+  return { id:orderId, date:'—', items:lines.length, total:lines.reduce((s,l,i)=> s + l.qty * (PRODUCTS.find(p=>p.id===l.sku)?.price||10), 0), status: STAGE_LABELS[stage], stage, lines, customer:nm };
+}
+
+function openOrderDetail(orderId){
+  const o = findOrderRecord(orderId);
+  const body = document.getElementById('invoiceModalBody');
+  body.innerHTML = `
+    <div style="padding:28px 30px;">
+      <div class="flex-between" style="margin-bottom:6px;">
+        <h3 style="font-family:var(--display);margin:0;">${o.id}</h3>
+        <span class="badge ${o.stage>=4?'green':o.stage>=2?'amber':'grey'}">${STAGE_LABELS[o.stage]}</span>
+      </div>
+      <p style="color:#666;font-size:12.5px;margin:0 0 22px;">${o.customer || CUSTOMER.name} · ${o.date && o.date!=='—' ? o.date : 'date pending'}</p>
+
+      <div class="pulse-track" style="background:#eee;">
+        <div class="pulse-fill" style="width:${o.stage*25}%;"></div>
+        ${STAGE_LABELS.map((l,i)=>`<div class="pulse-node ${i<=o.stage?'lit':''}" style="left:${i*25}%;border-color:${i<=o.stage?'':'#ccc'};"></div>`).join('')}
+      </div>
+      <div class="pulse-labels" style="color:#888;">
+        ${STAGE_LABELS.map((l,i)=>`<span style="${i<=o.stage?'color:#12201D;font-weight:600;':''}">${l}</span>`).join('')}
+      </div>
+
+      <h2 style="margin-top:26px;">Line items</h2>
+      <table>
+        <thead><tr><th>Product</th><th>SKU</th><th>Qty (pcs)</th></tr></thead>
+        <tbody>
+          ${o.lines.map(l=>{
+            const p = PRODUCTS.find(x=>x.id===l.sku);
+            return `<tr><td>${p?p.icon+' '+p.name:l.sku}</td><td class="mono">${l.sku}</td><td>${l.qty}</td></tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      <div style="text-align:right;font-size:14px;font-weight:600;">Order total: ${money(o.total)}</div>
+    </div>
+    <div class="invoice-actions">
+      <button class="btn btn-ghost" onclick="closeInvoice()">Close</button>
+      <button class="btn btn-primary" onclick="openInvoiceFromCartLike(${JSON.stringify(o)})">View invoice</button>
+    </div>
+  `;
+  document.getElementById('invoiceOverlay').style.display = 'flex';
+}
+function openInvoiceFromCartLike(o){
+  const subtotal = o.total / (1+TAX_RATE);
+  const tax = o.total - subtotal;
+  renderInvoice({
+    orderNum:o.id,
+    lines: o.lines.map(l=>{
+      const p = PRODUCTS.find(x=>x.id===l.sku);
+      return { name:p?p.name:l.sku, hsn:p?(HSN_CODES[p.cat]||'—'):'—', qty:l.qty, rate:p?p.price:'—', amount:p?p.price*l.qty:0, discount:0, net:p?p.price*l.qty:0 };
+    }),
+    subtotal, tax, delivery:0, total:o.total, date:new Date()
+  });
+}
+
+/* ---------------- Force ERP reconciliation ---------------- */
+function forceReconcile(){
+  if(state.syncing) return;
+  state.syncing = true;
+  renderMain(); afterFinance();
+  toast('🔄','Reconciling queued Tally transactions…');
+  setTimeout(()=>{
+    state.syncQueued = 0;
+    state.lastSync = 'just now';
+    state.syncing = false;
+    addNotification('✅','Tally reconciliation complete — 3 payments synced, 0 conflicts');
+    toast('✅','Reconciliation complete — all records in sync');
+    renderMain(); afterFinance();
+  }, 1300);
+}
+
+/* ---------------- Admin drill-downs ---------------- */
+function renderRegionRow(name, total, topAccounts, trend){
+  const payload = { name, total, topAccounts, trend };
+  return `<div class="list-row" style="cursor:pointer;" onclick='openRegionDetail(${JSON.stringify(payload)})'>
+    <span>${name} →</span><span><b>${total}</b></span>
+  </div>`;
+}
+function openRegionDetail(r){
+  const body = document.getElementById('invoiceModalBody');
+  body.innerHTML = `
+    <div style="padding:28px 30px;">
+      <h3 style="font-family:var(--display);margin:0 0 4px;">${r.name}</h3>
+      <p style="color:#666;font-size:12.5px;margin:0 0 20px;">${r.total} revenue · ${r.trend}</p>
+      <h2 style="font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:#666;margin-bottom:10px;">Top accounts</h2>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;">
+        ${r.topAccounts.map(a=>`<div style="padding:9px 12px;background:#F2F1EA;border-radius:7px;">${a}</div>`).join('')}
+      </div>
+    </div>
+    <div class="invoice-actions">
+      <button class="btn btn-ghost" onclick="closeInvoice()">Close</button>
+      <button class="btn btn-primary" onclick="closeInvoice();setView('sales');">View in Sales Portal</button>
+    </div>
+  `;
+  document.getElementById('invoiceOverlay').style.display = 'flex';
+}
+function requestIntegration(name){
+  addNotification('🔌', `${name} integration request logged for your account manager`);
+  toast('🔌', `Request sent — your account manager will follow up about connecting ${name}`);
+}
+
+/* ---------------- Warehouse: purchase orders & RMA detail ---------------- */
+function createPurchaseOrder(productId){
+  const p = PRODUCTS.find(x=>x.id===productId);
+  if(!p) return;
+  const already = state.purchaseOrders.find(po=>po.sku===productId);
+  if(already){
+    toast('ℹ️', `A purchase order (${already.poNum}) for ${p.name} is already open`);
+    return;
+  }
+  const poNum = 'PO-' + Math.floor(4000 + Math.random()*5999);
+  const qty = Math.max(200, (p.stock.reserved||0) * 3);
+  state.purchaseOrders.push({ poNum, sku:p.id, name:p.name, qty });
+  addNotification('📥', `${poNum} raised — ${qty} pcs of ${p.name} from supplier`);
+  toast('📥', `Purchase order ${poNum} raised for ${qty} pcs of ${p.name}`);
+  renderMain();
+}
+function openRmaDetail(id, desc, status){
+  const body = document.getElementById('invoiceModalBody');
+  body.innerHTML = `
+    <div style="padding:28px 30px;">
+      <div class="flex-between" style="margin-bottom:4px;">
+        <h3 style="font-family:var(--display);margin:0;">${id}</h3>
+        <span class="badge ${status==='resolved'?'green':'amber'}">${status==='resolved'?'Resolved':'Credit note pending'}</span>
+      </div>
+      <p style="color:#666;font-size:13px;margin:14px 0 20px;">${desc}. Logged by warehouse staff during receiving inspection.</p>
+      <div style="background:#F2F1EA;border-radius:8px;padding:14px;font-size:12.5px;color:#444;">
+        ${status==='resolved'
+          ? 'Credit note issued to customer account and reconciled with Tally. No further action needed.'
+          : 'Awaiting finance sign-off on the credit note amount before it posts to the customer ledger.'}
+      </div>
+    </div>
+    <div class="invoice-actions">
+      <button class="btn btn-ghost" onclick="closeInvoice()">Close</button>
+      ${status!=='resolved' ? `<button class="btn btn-primary" onclick="resolveRma('${id}')">Approve credit note</button>` : '<span></span>'}
+    </div>
+  `;
+  document.getElementById('invoiceOverlay').style.display = 'flex';
+}
+function resolveRma(id){
+  closeInvoice();
+  addNotification('✅', `${id} credit note approved and posted to Tally`);
+  toast('✅', `${id} resolved — credit note posted`);
 }
